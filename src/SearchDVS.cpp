@@ -350,57 +350,54 @@ void CSearchDVS::YunniSearchProcess(){
 		return;
     }
 
-	int i;
+	int i; 	
+	int ret = PPPP_SearchExt(devices,16,1000);
+	if(ret <= 0){
+		Log3("PPPP_SearchExt run failed.");
+		return; 
+	}
+	
+	int nPort=0;
+	int sysmode=0;
 
-	while(Yunni_SearchThreadRunning){
- 	
-		int ret = PPPP_SearchExt(devices,16,1000);
-		if(ret <= 0){
-			continue; 
+	char Mactemp[128] = {0};
+
+	jstring jdevname = NULL;
+	jstring jipaddr = NULL;
+	jstring jdeviceid = NULL;
+    jstring jmac = NULL;
+	
+	for(i = 0;i < ret;i++){
+		
+		memset(Mactemp, 0, sizeof(Mactemp));
+	 
+		jdevname = m_envLocal->NewStringUTF(devices[i].mName); 
+		jipaddr = m_envLocal->NewStringUTF(devices[i].mIP);
+		jdeviceid = m_envLocal->NewStringUTF(devices[i].mDID);
+		jmac = m_envLocal->NewStringUTF(Mactemp);
+		
+		GET_LOCK( &g_CallbackContextLock );
+		
+		if(g_CallBack_Handle != NULL){
+			m_envLocal->CallVoidMethod(
+				g_CallBack_Handle,
+				g_CallBack_SearchResults,
+				1,
+				jmac,
+				jdevname,
+				jdeviceid,
+				jipaddr,
+				nPort,
+				sysmode
+			);
 		}
 		
-		for(i=0;i<ret;i++){
-			
-			char Mactemp[128] = {0};
-			memset(Mactemp, 0, sizeof(Mactemp));
-			//sprintf(Mactemp,"%d:%d:%d:%d:%d:%d",10,11,12,13,14,15,16);
-			
-			jstring jdevname = NULL;
-			jstring jipaddr = NULL;
-			jstring jdeviceid = NULL;
-		    jstring jmac = NULL;
-		    
-			int nPort=0;
-			int sysmode=0;
+		PUT_LOCK( &g_CallbackContextLock );
 
-			jdevname = m_envLocal->NewStringUTF(devices[i].mName); 
-
-			jipaddr = m_envLocal->NewStringUTF(devices[i].mIP);
-
-			jdeviceid = m_envLocal->NewStringUTF(devices[i].mDID);
-			
-			jmac = m_envLocal->NewStringUTF(Mactemp);
-			
-			GET_LOCK( &g_CallbackContextLock);
-				if(g_CallBack_Handle != NULL){
-					m_envLocal->CallVoidMethod(
-						g_CallBack_Handle,
-						g_CallBack_SearchResults,
-						1,
-						jmac,
-						jdevname,
-						jdeviceid,
-						jipaddr,
-						nPort,
-						sysmode
-					);
-				    m_envLocal->DeleteLocalRef(jipaddr);
-				    m_envLocal->DeleteLocalRef(jdevname);
-				    m_envLocal->DeleteLocalRef(jmac);
-				    m_envLocal->DeleteLocalRef(jdeviceid);
-				}
-			PUT_LOCK( &g_CallbackContextLock );
-		}
+		m_envLocal->DeleteLocalRef(jipaddr);
+	    m_envLocal->DeleteLocalRef(jdevname);
+	    m_envLocal->DeleteLocalRef(jmac);
+	    m_envLocal->DeleteLocalRef(jdeviceid);
 	}
 }
 	

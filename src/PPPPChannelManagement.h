@@ -42,19 +42,11 @@ public:
 
 	//////////尝试还是将音频处理放公共的地方/////////////
 	OPENXL_STREAM * 	hOSL;
-	CAudioDataList *	hAudioGetList;//手机采集录制的声音
-	CAudioDataList *	hAudioPutList;//播放过缓存的参考的声音
-	
-	CCircleBuf *		hSoundBuffer;	//音频录制缓冲区
 
 private:
     PPPP_CHANNEL m_PPPPChannel[MAX_PPPP_CHANNEL_NUM];
 	COMMO_LOCK PPPPChannelLock;
 	COMMO_LOCK PPPPCommandLock;
-	
-	COMMO_LOCK AudioLock;
-		
-
 };
 
 #endif

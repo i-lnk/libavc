@@ -11,7 +11,6 @@
 #include "object_jni.h"
 #include "SearchDVS.h"
 #include "PPPPChannelManagement.h"
-#include "global_h264decoder.h"
 
 #include "appreq.h"
 #include "apprsp.h"
@@ -32,6 +31,10 @@ jmethodID g_CallBack_CmdRecv =	NULL;
 JavaVM * g_JavaVM = NULL;
 static const char * classPathName = ANDROID_CLASS_PATH;
 #else
+void   JNIEnv::SetByteArrayRegion(char * a, int b, int c, char * d){
+	memcpy(a,&d[b],c);
+}
+
 void * JNIEnv::GetByteArrayElements(char * a, int b){
     return a;
 }
@@ -355,22 +358,24 @@ JNIEXPORT int JNICALL PPPPInitialize(JNIEnv *env ,jobject obj, jstring svr)
 	if(ret != ERROR_PPPP_SUCCESSFUL){
 		Log3("PPPP_Initialize error exit...ret=%d ",ret);
 	}
+	
 	return ret;
 }
 
 JNIEXPORT void JNICALL PPPPManagementInit(JNIEnv *env ,jobject obj)
 { 	
-    g_pPPPPChannelMgt = new CPPPPChannelManagement();
-	
-    global_init_decode();
-	
+	if(g_pPPPPChannelMgt == NULL){
+    	g_pPPPPChannelMgt = new CPPPPChannelManagement();
+	}else{
+		Log3("PPPPChannelMgt already initialized.");
+	}
 }
 
 JNIEXPORT void JNICALL PPPPManagementFree(JNIEnv *env ,jobject obj)
 {
-    SAFE_DELETE(g_pPPPPChannelMgt); 
-
-    global_free_decoder();
+	Log3("stop all connected channel");
+	g_pPPPPChannelMgt->StopAll();
+	Log3("stop all connected channel done");
 }
 
 JNIEXPORT int JNICALL PPPPSetCallbackContext(JNIEnv *env, jobject obj, jobject context)
@@ -379,7 +384,14 @@ JNIEXPORT int JNICALL PPPPSetCallbackContext(JNIEnv *env, jobject obj, jobject c
        	Log3("set java callback for jni layer failed.\n");
 		return -1;
     }else{
+    	Log3("get callback lock from PPPPSetCallbackContext");
 		GET_LOCK(&g_CallbackContextLock);
+		if(g_CallBack_Handle){
+			PUT_LOCK(&g_CallbackContextLock);
+			Log3("callback context already set.");
+			Log3("get callback lock from PPPPSetCallbackContext");
+			return 0;
+		}
 
 #ifdef PLATFORM_ANDROID
         g_CallBack_Handle = env->NewGlobalRef(context);
@@ -413,6 +425,8 @@ JNIEXPORT int JNICALL PPPPSetCallbackContext(JNIEnv *env, jobject obj, jobject c
 #endif
 		
 		PUT_LOCK(&g_CallbackContextLock);
+	Log3("get callback lock from PPPPSetCallbackContext");
+
     } 
 
     return 0;
@@ -563,8 +577,10 @@ JNIEXPORT int JNICALL ClosePPPPLivestream(
 ){
     //F_LOG;
     
-    if(g_pPPPPChannelMgt == NULL)
+    if(g_pPPPPChannelMgt == NULL){
+		Log3("channel manager is null.");
         return 0;
+    }
 
     char *szDID;
     szDID = (char*)env->GetStringUTFChars(did,0);
@@ -573,6 +589,8 @@ JNIEXPORT int JNICALL ClosePPPPLivestream(
         env->ReleaseStringUTFChars(did, szDID);
         return 0;
     }
+
+	Log3("close live stream by %s.",szDID);
     
     int nRet = g_pPPPPChannelMgt->ClosePPPPLivestream(szDID);
     env->ReleaseStringUTFChars(did, szDID);
@@ -1155,6 +1173,7 @@ JNIEXPORT int JNICALL SendCtrlCommand_EX(
 			case CMD_DATACTRL_PLAYLIVE_STOP:
 			case CMD_DATACTRL_PLAYBACK_START:
 			case CMD_DATACTRL_PLAYBACK_STOP:
+			case CMD_DEV_RECORD_PLAYBACK_SEEK:
 			case CMD_DATACTRL_FILESAVEPATH:
 			case CMD_DATACTRL_FILE_GET:
 			case CMD_DATACTRL_FILE_PUT:

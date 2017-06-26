@@ -12,7 +12,6 @@
 #include <sys/stat.h> 
 #include <sys/types.h> 
 
-
 #include "utility.h"
 #include "PPPPChannel.h"  
 
@@ -27,7 +26,8 @@
 #include "appreq.h"
 #include "apprsp.h"
 
-
+//#define ENABLE_VIDEO_RECORD_FIX
+#define ENABLE_AUDIO_RECORD
 #define ENABLE_AEC
 #define ENABLE_AGC
 #define ENABLE_NSX_I
@@ -85,11 +85,11 @@ static void recordCallback(
 	OPENXL_STREAM * p = (OPENXL_STREAM *)context;
 	CPPPPChannel * hPC = (CPPPPChannel *)p->context;
 
-    short *hFrame = p->recordBuffer+(p->iBufferIndex*AEC_CACHE_LEN/2);
+    short * hFrame = p->recordBuffer+(p->iBufferIndex * hPC->Audio10msLength  / sizeof(short));
 	
-	hPC->hAudioGetList->Write(hFrame,GetAudioTime());
+	hPC->hAudioGetList->Put((char*)hFrame,hPC->Audio10msLength);
 
-	(*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,(char*)hFrame,AEC_CACHE_LEN);
+	(*p->recorderBufferQueue)->Enqueue(p->recorderBufferQueue,(char*)hFrame,hPC->Audio10msLength);
 
     p->iBufferIndex = (p->iBufferIndex+1)%CBC_CACHE_NUM;
 }
@@ -102,20 +102,19 @@ static void playerCallback(
 	OPENXL_STREAM * p = (OPENXL_STREAM *)context;
 	CPPPPChannel * hPC = (CPPPPChannel *)p->context;
 
-    short *hFrame = p->outputBuffer+(p->oBufferIndex*AEC_CACHE_LEN/2);
+    short *hFrame = p->outputBuffer+(p->oBufferIndex * hPC->Audio10msLength / sizeof(short));
 
-	hPC->hAudioPutList->Write((short*)hFrame,GetAudioTime());
+	hPC->hAudioPutList->Put((char*)hFrame,hPC->Audio10msLength);
 	
-	int stocksize = hPC->hSoundBuffer->GetStock();
+	int stocksize = hPC->hSoundBuffer->Used();
 
-	if(stocksize >= AEC_CACHE_LEN){
-//      Log3("read audio data from sound buffer with lens:[%d]",stocksize);
-		hPC->hSoundBuffer->Read((char*)hFrame,AEC_CACHE_LEN);
+	if(stocksize >= hPC->Audio10msLength){
+		hPC->hSoundBuffer->Get((char*)hFrame,hPC->Audio10msLength);
 	}else{
-        memset((char*)hFrame,0,AEC_CACHE_LEN);
+        memset((char*)hFrame,0,hPC->Audio10msLength);
 	}
 
-	(*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,(char*)hFrame,AEC_CACHE_LEN);
+	(*p->bqPlayerBufferQueue)->Enqueue(p->bqPlayerBufferQueue,(char*)hFrame,hPC->Audio10msLength);
 
     p->oBufferIndex = (p->oBufferIndex+1)%CBC_CACHE_NUM;
 }
@@ -123,38 +122,38 @@ static void playerCallback(
 #else
 
 static void recordCallback(char * data, int lens, void *context){
-    if(lens > AEC_CACHE_LEN){
+    OPENXL_STREAM * p = (OPENXL_STREAM *)context;
+    CPPPPChannel * hPC = (CPPPPChannel *)p->context;
+
+	if(lens > hPC->Audio10msLength){
         Log3("audio record sample is too large:[%d].",lens);
         return;
     }
-    
-    OPENXL_STREAM * p = (OPENXL_STREAM *)context;
-    CPPPPChannel * hPC = (CPPPPChannel *)p->context;
     
     char * pr = (char*)p->recordBuffer;
     memcpy(pr + p->recordSize,data,lens);
     p->recordSize += lens;
     
-    if(p->recordSize >= AEC_CACHE_LEN){
-        hPC->hAudioGetList->Write((short*)pr,GetAudioTime());
-        p->recordSize -= AEC_CACHE_LEN;
-        memcpy(pr,pr + AEC_CACHE_LEN,p->recordSize);
+    if(p->recordSize >= hPC->Audio10msLength){
+        hPC->hAudioGetList->Put(pr,hPC->Audio10msLength);
+        p->recordSize -= hPC->Audio10msLength;
+        memcpy(pr,pr + hPC->Audio10msLength,p->recordSize);
     }
 }
 
 static void playerCallback(char * data, int lens, void *context){
-    if(lens > AEC_CACHE_LEN){
+    OPENXL_STREAM * p = (OPENXL_STREAM *)context;
+    CPPPPChannel * hPC = (CPPPPChannel *)p->context;
+
+	 if(lens > hPC->Audio10msLength){
         Log3("audio output sample is too large:[%d].",lens);
         return;
     }
     
-    OPENXL_STREAM * p = (OPENXL_STREAM *)context;
-    CPPPPChannel * hPC = (CPPPPChannel *)p->context;
-    
-    int stocksize = hPC->hSoundBuffer->GetStock();
+    int stocksize = hPC->hSoundBuffer->Used();
     
     if(stocksize >= lens){
-        hPC->hSoundBuffer->Read((char*)data,lens);
+        hPC->hSoundBuffer->Get((char*)data,lens);
     }else{
         memset((char*)data,0,lens);
     }
@@ -163,13 +162,14 @@ static void playerCallback(char * data, int lens, void *context){
     memcpy(po + p->outputSize,data,lens);
     p->outputSize += lens;
     
-    if(p->outputSize >= AEC_CACHE_LEN){
-        hPC->hAudioPutList->Write((short*)po,GetAudioTime());
-        p->outputSize -= AEC_CACHE_LEN;
+    if(p->outputSize >= hPC->Audio10msLength){
+        hPC->hAudioPutList->Put(po,hPC->Audio10msLength);
+        p->outputSize -= hPC->Audio10msLength;
         memcpy(po,
-               po + AEC_CACHE_LEN,
+               po + hPC->Audio10msLength,
                p->outputSize);
     }
+
 }
 
 #endif
@@ -211,100 +211,97 @@ int FilePush(st_fileParam *data,void * hVoid){
 	
 	CPPPPChannel * hPC = (CPPPPChannel *)hVoid;
 	Log3("Function FilePush  ===================>1");
-	GET_LOCK(&hPC->DataWriteThreadLock);
 	Log3("Function FilePush  ===================>2");
-		if (hPC->m_rear!=NULL){
-			Log3("Function FilePush hPC->m_rear!=NULL ===================>1");
-			hPC->m_rear->next=data;
-			Log3("Function FilePush hPC->m_rear!=NULL ===================>2");
-			hPC->m_rear=data;
-			Log3("Function FilePush hPC->m_rear!=NULL ===================>3");
-			hPC->m_nNmb++;
-			Log3("Function FilePush hPC->m_rear!=NULL ===================>4");
-		}else{
-		
-			Log3("Function FilePush  ===================>3");
-			hPC->m_rear=data;
-			Log3("Function FilePush  ===================>4");
-			hPC->m_front=data;
-			Log3("Function FilePush  ===================>5");
-			hPC->m_nNmb=1;
-			Log3("Function FilePush  ===================>6");
-		}
-	PUT_LOCK(&hPC->DataWriteThreadLock);
+	if (hPC->m_rear!=NULL){
+		Log3("Function FilePush hPC->m_rear!=NULL ===================>1");
+		hPC->m_rear->next=data;
+		Log3("Function FilePush hPC->m_rear!=NULL ===================>2");
+		hPC->m_rear=data;
+		Log3("Function FilePush hPC->m_rear!=NULL ===================>3");
+		hPC->m_nNmb++;
+		Log3("Function FilePush hPC->m_rear!=NULL ===================>4");
+	}else{
+	
+		Log3("Function FilePush  ===================>3");
+		hPC->m_rear=data;
+		Log3("Function FilePush  ===================>4");
+		hPC->m_front=data;
+		Log3("Function FilePush  ===================>5");
+		hPC->m_nNmb=1;
+		Log3("Function FilePush  ===================>6");
+	}
 	return hPC->m_nNmb;
 }
 
 int FileWrite(JNIEnv * env,char *magic,void *data,unsigned int len,void * hVoid){
 	char MsgStr[128] = {0};
 	CPPPPChannel * hPC = (CPPPPChannel *)hVoid;
-	GET_LOCK(&hPC->DataWriteThreadLock);
-		st_fileParam *cur=hPC->m_front;
-		st_fileParam *mNext=NULL;
+	st_fileParam *cur=hPC->m_front;
+	st_fileParam *mNext=NULL;
 
-		if (magic==NULL){
-			Log3("magic == NULL");
-			return -1;
+	if (magic==NULL){
+		Log3("magic == NULL");
+		return -1;
+	}
+	
+	if (cur==NULL){
+		Log3("can not find out the node which magic=%s",magic);
+		return -1;
+	}
+
+	while(cur!=NULL){
+		mNext=cur->next;
+		if (memcmp(cur->magic,magic,4)==0)break;
+		cur=mNext;
+	}
+
+	fwrite((const void*)data,len,1,cur->fd);
+	cur->offset+=len;
+	hPC->m_n=cur->offset;
+	
+	//回调下载进度
+	sprintf(MsgStr,"%d",(hPC->m_n * 100) / cur->size);
+	Log3("Current has DownLoad progress : ===================>%s",MsgStr);
+
+		GET_LOCK(&g_CallbackContextLock);
+		    if(g_CallBack_Handle != NULL)
+		    {   
+
+				jstring	jstring_did = env->NewStringUTF(hPC->szDID);
+		        jstring jstring_msg = env->NewStringUTF(MsgStr);
+					
+				env->CallVoidMethod(g_CallBack_Handle,g_CallBack_UILayerNotify,jstring_did,CMD_FILE_DOWNLOAD_PROGRESS,jstring_msg);
+
+				env->DeleteLocalRef(jstring_did); 
+		        env->DeleteLocalRef(jstring_msg);
+	    	}
+		PUT_LOCK(&g_CallbackContextLock);
+
+	if (hPC->m_n == cur->size){
+		if (cur->pres!=NULL){
+			cur->pres->next=cur->next;
+		}
+		else{
+			hPC->m_front=cur->next;
+			if (hPC->m_front!=NULL)hPC->m_front->pres=NULL;
 		}
 		
-		if (cur==NULL){
-			Log3("can not find out the node which magic=%s",magic);
-			return -1;
+		if (cur->next!=NULL){
+			cur->next->pres=cur->pres;
+		}
+		else{
+			hPC->m_rear=cur->pres;
+			if (hPC->m_rear!=NULL)hPC->m_rear->next=NULL;
 		}
 
-		while(cur!=NULL){
-			mNext=cur->next;
-			if (memcmp(cur->magic,magic,4)==0)break;
-			cur=mNext;
-		}
+		hPC->m_n=0;
 
-		fwrite((const void*)data,len,1,cur->fd);
-		cur->offset+=len;
-		hPC->m_n=cur->offset;
-		
-		//回调下载进度
-		sprintf(MsgStr,"%d",(hPC->m_n * 100) / cur->size);
-		Log3("Current has DownLoad progress : ===================>%s",MsgStr);
+		Log3("close the fileMagic[%s]",cur->magic);
+		fclose(cur->fd);		
+		FileParam_free(cur);
+		Log3("FileParam_free(cur)");
+	}
 
-			GET_LOCK(&g_CallbackContextLock);
-			    if(g_CallBack_Handle != NULL)
-			    {   
-
-					jstring	jstring_did = env->NewStringUTF(hPC->szDID);
-			        jstring jstring_msg = env->NewStringUTF(MsgStr);
-						
-					env->CallVoidMethod(g_CallBack_Handle,g_CallBack_UILayerNotify,jstring_did,CMD_FILE_DOWNLOAD_PROGRESS,jstring_msg);
-
-					env->DeleteLocalRef(jstring_did); 
-			        env->DeleteLocalRef(jstring_msg);
-		    	}
-			PUT_LOCK(&g_CallbackContextLock);
-
-		if (hPC->m_n == cur->size){
-			if (cur->pres!=NULL){
-				cur->pres->next=cur->next;
-			}
-			else{
-				hPC->m_front=cur->next;
-				if (hPC->m_front!=NULL)hPC->m_front->pres=NULL;
-			}
-			
-			if (cur->next!=NULL){
-				cur->next->pres=cur->pres;
-			}
-			else{
-				hPC->m_rear=cur->pres;
-				if (hPC->m_rear!=NULL)hPC->m_rear->next=NULL;
-			}
-
-			hPC->m_n=0;
-
-			Log3("close the fileMagic[%s]",cur->magic);
-			fclose(cur->fd);		
-			FileParam_free(cur);
-			Log3("FileParam_free(cur)");
-		}
-	PUT_LOCK(&hPC->DataWriteThreadLock);
 	return hPC->m_n;
 }
 
@@ -422,7 +419,6 @@ static void *FileRecvProcess(
 	jbyteArray jbyteArray_yuv = hEnv->NewByteArray(hPC->YUVSize);
 	jbyte *	   jbyte_yuv = (jbyte *)(hEnv->GetByteArrayElements(jbyteArray_yuv,0));
 	
-	GET_LOCK(&hPC->fileRecvThreadLock);
     while(hPC->fileRecving){
 		usleep(10000);
         //read head
@@ -518,8 +514,7 @@ static void *FileRecvProcess(
 	hEnv->ReleaseByteArrayElements(jbyteArray_yuv,jbyte_yuv,0);
 	hEnv->DeleteLocalRef(jbyteArray_yuv);
 	hEnv->DeleteLocalRef(jstring_did);
-	
-	PUT_LOCK(&hPC->fileRecvThreadLock); 
+
 	Log3("p2pChannel_File_RecvProc quit ...");
 #ifdef PLATFORM_ANDROID
     if(isAttached) 
@@ -557,6 +552,9 @@ void * MeidaCoreProcess(
 	int resend = 0;
 	int wakeup_times = 20;
 	int retry = 5;
+
+	int ret = 0;
+	int connection_status = PPPP_STATUS_DISCONNECTED;
 connect:
     hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
     
@@ -567,7 +565,19 @@ connect:
          hPC->szDID);
 	//yunni p2p
 	Log3("p2p_ConnectProc Begin----------------\n");
-    hPC->p2p_ConnectProc(hEnv);   
+	ret = hPC->p2p_ConnectProc(hEnv);
+    switch(ret){
+		case 0:
+			break;
+		case -1:
+			connection_status = PPPP_STATUS_DISCONNECTED;
+			goto jumperr;
+		case -2:
+			connection_status = PPPP_STATUS_USER_NOT_LOGIN;
+			goto jumperr;
+		default:
+			goto jumperr;
+	}
 
 	Log3("[2:%s]=====>channel init command proc here.",hPC->szDID);
 	hPC->StartIOCmdChannel();
@@ -577,8 +587,9 @@ connect:
 	
 	GET_LOCK(&hPC->SessionStatusLock);
 	hPC->SessionStatus = STATUS_SESSION_IDLE;
+	Log3("SESSION STATUS:IDLE");
 	PUT_LOCK(&hPC->SessionStatusLock);
-	int ret = 0;
+	
 	while(hPC->mediaLinking){
 		//Check User Status
 		st_PPPP_Session1 SInfo;
@@ -595,6 +606,7 @@ connect:
 				hPC->PPPPClose();
 			}
 			Log3("[7:%s]=====>stop old media process close.\n",hPC->szDID);
+			
 			if(ret = ERROR_PPPP_INVALID_SESSION_HANDLE){
 				if(retry > 0){
 					retry--;
@@ -609,19 +621,26 @@ connect:
 
 jumperr:
 
-#ifdef PLATFORM_ANDROID
-	if(isAttached) g_JavaVM->DetachCurrentThread();
-#endif
-
     if(!hPC->CloseWholeThreads()){   // make sure other service thread all exit.
     	Log3("MediaCoreProcess hPC->PPPPClose()........2");
 		hPC->PPPPClose();
 	} 	
 
+	Log3("Get Session status lock");
+
 	GET_LOCK(&hPC->SessionStatusLock);
 	hPC->SessionStatus = STATUS_SESSION_DIED;
+	Log3("SESSION STATUS:DIED");
 	PUT_LOCK(&hPC->SessionStatusLock);
-	
+
+	Log3("UILayer status set start");
+	hPC->MsgNotify(hEnv,MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+	Log3("UILayer status set done");
+
+#ifdef PLATFORM_ANDROID
+	if(isAttached) g_JavaVM->DetachCurrentThread();
+#endif
+
 	Log3("MeidaCoreProcess Stop ..............");
 
 	return NULL;	
@@ -638,7 +657,7 @@ void * IOCmdSendProcess(
 
 	int nBytesRead = 0;
 	
-	hPC->hIOCmdBuffer->Reset();
+	hPC->hIOCmdBuffer->Clear();
 	
     while(hPC->iocmdSending){
 		if(hPC->hIOCmdBuffer == NULL){
@@ -647,9 +666,9 @@ void * IOCmdSendProcess(
 			continue;
 		}
 
-		if(hPC->hIOCmdBuffer->GetStock() >= (int)sizeof(APP_CMD_HEAD)){
+		if(hPC->hIOCmdBuffer->Used() >= (int)sizeof(APP_CMD_HEAD)){
 			
-			nBytesRead = hPC->hIOCmdBuffer->Read(hCmds,sizeof(APP_CMD_HEAD));
+			nBytesRead = hPC->hIOCmdBuffer->Get((char*)hCmds,sizeof(APP_CMD_HEAD));
 			if(nBytesRead == sizeof(APP_CMD_HEAD)){
                 if(hCmds->Magic != 0x78787878
                 || hCmds->CgiLens > sizeof(Cmds)
@@ -661,13 +680,13 @@ void * IOCmdSendProcess(
                          hCmds->CgiLens
                          );
                     
-                    hPC->hIOCmdBuffer->Reset();
+                    hPC->hIOCmdBuffer->Clear();
                 }
 
 				nBytesRead = 0;
 				while(nBytesRead != hCmds->CgiLens){
 					
-					nBytesRead = hPC->hIOCmdBuffer->Read(hCmds->CgiData,hCmds->CgiLens);
+					nBytesRead = hPC->hIOCmdBuffer->Get(hCmds->CgiData,hCmds->CgiLens);
 
 					Log3("[X:%s]=====>data not ready.\n",hPC->szDID);
 					usleep(1000);
@@ -726,8 +745,9 @@ void * IOCmdRecvProcess(
 	unsigned int IOCtrlType = 0;
 	CMD_CHANNEL_HEAD * hCCH = (CMD_CHANNEL_HEAD*)Params;
 	int avIdx = hPC->avIdx;
-	
-	GET_LOCK(&hPC->cmdRecvThreadLock);
+
+	jbyteArray jbyteArray_cmd = hEnv->NewByteArray(sizeof(Params));
+	jstring jstring_did = hEnv->NewStringUTF(hPC->szDID);
 	
 	while(hPC->iocmdRecving){
 //yunni p2p 
@@ -766,15 +786,38 @@ void * IOCmdRecvProcess(
             break;
         }
 		
-		//hPC->ProcessCommand(hEnv,hCCH->version,hCCH->cmd,hCCH->d,hCCH->len);
+		//
 		// here we process command for yunni p2p
 		// ...
 		Log3("ProcessCommand: hand instructions from Camera [%04x] ! \n",hCCH->cmd);
-		//hPC->ProcessCommand(hEnv,hCCH->version,hCCH->cmd,hCCH->d,hCCH->len);
-		hPC->ProcessCommand_EX(hEnv,hCCH->version,hCCH->cmd,hCCH->d,hCCH->len);
+
+		if(hCCH->cmd == CMD_SYSTEM_USER_CHK){
+			hPC->ConnectUserCheckAcK(hEnv,hCCH->d,hCCH->len);
+			Log3("ConnectUserCheckAcK,len=%d",hCCH->len);
+			continue;
+		}
+
+		GET_LOCK(&g_CallbackContextLock);
+		
+	    if(g_CallBack_Handle != NULL){     
+			hEnv->SetByteArrayRegion(jbyteArray_cmd,0,hCCH->len,(jbyte*)hCCH->d);
+			
+			hEnv->CallVoidMethod(
+				g_CallBack_Handle, 
+				g_CallBack_CmdRecv, 
+				jstring_did, 
+				hPC->sessionID, 
+				hCCH->cmd, 
+				jbyteArray_cmd, 
+				hCCH->len
+				);
+	    }
+		
+		PUT_LOCK(&g_CallbackContextLock);
     }
 
-	PUT_LOCK(&hPC->cmdRecvThreadLock);
+	hEnv->DeleteLocalRef(jbyteArray_cmd); 
+    hEnv->DeleteLocalRef(jstring_did);
 	
 #ifdef PLATFORM_ANDROID
 	if(isAttached) g_JavaVM->DetachCurrentThread();
@@ -810,7 +853,6 @@ static void * VideoPlayProcess(
 
 	jstring    jstring_did = hEnv->NewStringUTF(hPC->szDID);
 	jbyteArray jbyteArray_yuv = hEnv->NewByteArray(hPC->YUVSize);
-	jbyte *	   jbyte_yuv = (jbyte *)(hEnv->GetByteArrayElements(jbyteArray_yuv,0));
 
 	GET_LOCK(&hPC->DisplayLock);
 	hPC->hVideoFrame = NULL;
@@ -832,10 +874,16 @@ static void * VideoPlayProcess(
 			PUT_LOCK(&hPC->DisplayLock);
 			usleep(1000); continue;
 		}
-		
-		memcpy(jbyte_yuv,hPC->hVideoFrame,hPC->YUVSize);
+
+		hEnv->SetByteArrayRegion(jbyteArray_yuv, 0, hPC->YUVSize, (const jbyte *)hPC->hVideoFrame);
+//		memcpy(jbyte_yuv,hPC->hVideoFrame,hPC->YUVSize);
 
 		hPC->hVideoFrame = NULL;
+
+		int NW = hPC->MW;
+		int NH = hPC->MH;
+		int NS = NW * NH + NW * NH * 3 / 2;
+		unsigned int TS = hPC->PlayBackTime;
 
 		PUT_LOCK(&hPC->DisplayLock);
 
@@ -849,15 +897,14 @@ static void * VideoPlayProcess(
 			jstring_did,
 			jbyteArray_yuv,
 			1, 
-			hPC->YUVSize,
-			hPC->MW,
-			hPC->MH,
-			time(NULL));
+			NS,
+			NW,
+			NH,
+			TS);
 
 		PUT_LOCK( &g_CallbackContextLock );
 	}
 
-	hEnv->ReleaseByteArrayElements(jbyteArray_yuv,jbyte_yuv,0);
 	hEnv->DeleteLocalRef(jbyteArray_yuv);
 	hEnv->DeleteLocalRef(jstring_did);
 
@@ -879,8 +926,6 @@ static void * VideoRecvProcess(
 	
 	CPPPPChannel * hPC = (CPPPPChannel*)hVoid;
 	int FrmSize = hPC->YUVSize/3;
-	
-	CH264Decoder * hDec = new CH264Decoder();	
 	AV_HEAD_YUNNI * hFrm  = (AV_HEAD_YUNNI*)malloc(FrmSize);
 	char   * hYUV = (char*)malloc(hPC->YUVSize);;
 	
@@ -906,7 +951,6 @@ static void * VideoRecvProcess(
 	memset(hFrm,0,FrmSize);
 	memset(hYUV,0,hPC->YUVSize);
 	
-	GET_LOCK(&hPC->videoRecvThreadLock);
 	while(hPC->videoPlaying)
 	{
 			
@@ -965,27 +1009,41 @@ static void * VideoRecvProcess(
 			Log3("waiting for first video key frame coming.\n");
 			continue;
 		}
+
+		int W = 0;
+		int H = 0;
 	
 		// decode h264 frame
-		if(hDec->DecoderFrame((uint8_t *)hFrm->d,hFrm->len,hPC->MW,hPC->MH,isKeyFrame) <= 0){
+		if(hPC->hDec->DecoderFrame((uint8_t *)hFrm->d,hFrm->len,W,H,isKeyFrame) <= 0){
 			Log3("decode h.264 frame failed.");
 			firstKeyFrameComming = 0;
 			continue;
 		}
 
-		if(hPC->avExit == 1){	
-			if(hPC->hVideoBuffer->Write(hFrm,hFrm->len + sizeof(AV_HEAD)) == 0){
-				Log3("recording buffer is full.may lost frame in mp4.");
+		if(W <= 0 || H <= 0){
+			Log3("invalid decode resolution W:%d H:%d.",W,H);
+			continue;
+		}
+
+		int nBytesHave = hPC->hVideoBuffer->Available();
+
+		if(hPC->recordingExit){
+			if(nBytesHave >= hFrm->len + sizeof(AV_HEAD)){
+				hPC->hVideoBuffer->Put((char*)hFrm,hFrm->len + sizeof(AV_HEAD));
 			}
 		}
 
 		if(TRY_LOCK(&hPC->DisplayLock) != 0){
 			continue;
 		}
+
+		hPC->MW = W - hPC->MWCropSize;
+		hPC->MH = H - hPC->MHCropSize;
 		
 		// get h264 yuv data
-		hDec->GetYUVBuffer((uint8_t*)hYUV,hPC->YUVSize);
+		hPC->hDec->GetYUVBuffer((uint8_t*)hYUV,hPC->YUVSize,hPC->MW,hPC->MH);
 		hPC->hVideoFrame = hYUV;
+		hPC->PlayBackTime = hFrm->sectime;	//提取当前数据返回时间戳
 
 		PUT_LOCK(&hPC->DisplayLock);
 	}
@@ -994,7 +1052,6 @@ static void * VideoRecvProcess(
 	GET_LOCK(&hPC->DisplayLock);
 	if(hFrm)   free(hFrm); hFrm = NULL;
 	if(hYUV)   free(hYUV); hYUV = NULL;
-	if(hDec) delete(hDec); hDec = NULL;
     hPC->hVideoFrame = NULL;
 	
 #ifdef PLATFORM_ANDROID
@@ -1006,9 +1063,7 @@ static void * VideoRecvProcess(
 	isKeyFrame = 0;
 	
 	PUT_LOCK(&hPC->DisplayLock);
-	
-	PUT_LOCK(&hPC->videoRecvThreadLock);
-	
+
 	Log3("video recv proc exit.");
 	
 	return NULL;
@@ -1023,7 +1078,11 @@ static void * AudioRecvProcess(
 	int ret = 0;
 	CPPPPChannel * hPC = (CPPPPChannel*)hVoid;
 
-	void * hCodec = audio_dec_init(hPC->AudioRecvFormat,8000,1);
+	void * hCodec = audio_dec_init(
+		hPC->AudioRecvFormat,
+		hPC->AudioSampleRate,
+		hPC->AudioChannel
+		);
 	
 	if(hCodec == NULL){
 		Log3("initialize audio decodec handle failed.\n");
@@ -1031,26 +1090,45 @@ static void * AudioRecvProcess(
 	}
 	
 	char Cache[2048] = {0};	
-	char Codec[8192] = {0};	
+	char Codec[4096] = {0};	
+
+	int  CodecLength = 0;
+    int  CodecLengthNeed = 960;
 	
 	AV_HEAD_YUNNI * avhead =(AV_HEAD_YUNNI *)Cache;
 
-	hPC->hAudioBuffer->Reset();
-	hPC->hSoundBuffer->Reset();
-	
+	hPC->hAudioBuffer->Clear();
+	hPC->hSoundBuffer->Clear();
 	
 	//初始化
-	void * hAgc = NULL ;
-	hAgc= audio_agc_init(20,2,0,255,8000);
+	void * hAgc = NULL;
+	void * hNsx = NULL;
 	
+#ifdef ENABLE_AGC
+	hAgc = audio_agc_init(
+		20,
+		2,
+		0,
+		255,
+		hPC->AudioSampleRate);
+
 	if(hAgc == NULL){
 		Log3("initialize audio agc failed.\n");
 		goto jumperr;
 	}
+#endif
 
-	GET_LOCK(&hPC->audioRecvThreadLock); 
+#ifdef ENABLE_NSX_I
+	hNsx = audio_nsx_init(2,hPC->AudioSampleRate);
+
+	if(hNsx == NULL){
+		Log3("initialize audio nsx failed.\n");
+		goto jumperr;
+	}
+#endif
 	
 	Log3("AudioRecvProcess  come to read buff ----------> ");
+
 	while(hPC->audioPlaying){
 
 		ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_AUDIO, (char *)avhead, sizeof(AV_HEAD_YUNNI));
@@ -1060,7 +1138,7 @@ static void * AudioRecvProcess(
 			break;
 		}
 		
-		if (avhead->startcode!=AVF_STARTCODE){
+		if (avhead->startcode != AVF_STARTCODE){
 			Log3( "recv audio data is invalid!!,avhead.startcode=%04x\n",avhead->startcode );
 			break;
 			
@@ -1088,40 +1166,72 @@ static void * AudioRecvProcess(
 			continue;
 		}
 		
-		//判断audio编码格式和采样率
-		if(avhead->audiocodec!= hPC->AudioRecvFormat){
+		if(avhead->audiocodec != hPC->AudioRecvFormat){
 			Log3("invalid packet format for audio decoder:[%02X].",avhead->audiocodec);
 			audio_dec_free(hCodec);
-			Log3("initialize new audio decoder here.\n");
-			hCodec = audio_dec_init(avhead->audiocodec,8000,1);
+			
+			Log3("initialize new audio decoder here.\n")
+				
+			hCodec = audio_dec_init(
+				avhead->audiocodec,
+				hPC->AudioSampleRate,
+				hPC->AudioChannel
+				);
+			
 			if(hCodec == NULL){
 				Log3("initialize audio decodec handle for codec:[%02X] failed.",avhead->audiocodec);
 				break;
 			}
-			Log2("initialize new audio decoder done.\n");
+			Log3("initialize new audio decoder done.\n")
 			hPC->AudioRecvFormat = avhead->audiocodec;
 			continue;
 		}
 		
-		if((ret = audio_dec_process(hCodec,avhead->d,avhead->len,Codec,sizeof(Codec))) < 0){
+		if((ret = audio_dec_process(
+                hCodec,
+                avhead->d,
+                avhead->len,
+                &Codec[CodecLength],
+                sizeof(Codec) - CodecLength)) < 0){
+			
 			Log3("audio decodec process run error:%d with codec:[%02X] lens:[%d].\n",
 				ret,
 				hPC->AudioRecvFormat,
 				avhead->len
 				);
+			
 			continue;
 		}
-	//	Log3("Check Audio RecvBuff ret================>%d",ret);
-		int times = ret/160;
-		for(int i = 0; i < times; i++){
-			audio_agc_proc(hAgc,&Codec[160*i]);
-			hPC->hAudioBuffer->Write(&Codec[160*i],160); // for audio avi record
-			hPC->hSoundBuffer->Write(&Codec[160*i],160); // for audio player callback
+
+		CodecLength += ret;
+
+		if(CodecLength < CodecLengthNeed){
+            continue;
+        }
+
+		CodecLengthNeed = CodecLength - (CodecLength % hPC->Audio10msLength);
+		int Round = CodecLengthNeed/hPC->Audio10msLength;
+        
+		for(int i = 0; i < Round; i++){
+#ifdef ENABLE_NSX_I
+			audio_nsx_proc(hNsx,&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength);
+#endif
+#ifdef ENABLE_AGC
+			audio_agc_proc(hAgc,&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength);
+#endif
+			if(hPC->audioEnabled){
+				hPC->hSoundBuffer->Put((char*)&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength); // for audio player callback
+			}
+			
+#ifdef ENABLE_AUDIO_RECORD
+			hPC->hAudioBuffer->Put((char*)&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength); // for audio avi record
+#endif
 		}
+        
+        CodecLength -= CodecLengthNeed;
+        memcpy(Codec,&Codec[CodecLengthNeed],CodecLength);
 
 	}
-
-	PUT_LOCK(&hPC->audioRecvThreadLock); 
 	
 jumperr:
 
@@ -1139,46 +1249,37 @@ static void * AudioSendProcess(
 	
 	CPPPPChannel * hPC = (CPPPPChannel*)hVoid;
 
-	int iRet=0;
-	int length=0;
-	int type=0;
-	unsigned int pts=0;
-	int releaseFrame=0;
-	char sendBuf[1024]={0,};
-	int sendLen=0;
-	unsigned int frameno=0;
-	GET_LOCK(&hPC->audioSendThreadLock);
+	int ret = 0;
+	unsigned int frameno = 0;
 
-	void * hCodec = audio_enc_init(hPC->AudioSendFormat,8000,1);
-	
-	Log3("hPC->AudioSendFormat ------------> %04x ",hPC->AudioSendFormat);
-
+	void * hCodec = audio_enc_init(hPC->AudioSendFormat,hPC->AudioSampleRate,hPC->AudioChannel);
 	if(hCodec == NULL){
 		Log3("initialize audio encodec handle failed.\n");
 		return NULL;
 	}
-		
-	#ifdef ENABLE_AEC
-		void * hAEC = audio_echo_cancellation_init(3,8000);
-	#endif
 
-	#ifdef ENABLE_NSX_O
-		void * hNsx = audio_nsx_init(2,8000);
+#ifdef ENABLE_AEC
+	void * hAEC = audio_echo_cancellation_init(3,hPC->AudioSampleRate);
+#endif
 
-		if(hNsx == NULL){
+#ifdef ENABLE_NSX_O
+	void * hNsx = audio_nsx_init(2,hPC->AudioSampleRate);
+
+	if(hNsx == NULL){
 		Log3("initialize audio nsx failed.\n");
-		}
-	#endif
+	}
+#endif
 
-	#ifdef ENABLE_VAD
-		void * hVad = audio_vad_init();
-		if(hVad == NULL){
-			Log3("initialize audio vad failed.\n");
-		}
-	#endif
-#if 1
-	hPC->hAudioPutList = new CAudioDataList(32);
-	hPC->hAudioGetList = new CAudioDataList(32);
+#ifdef ENABLE_VAD
+	void * hVad = audio_vad_init();
+	if(hVad == NULL){
+		Log3("initialize audio vad failed.\n");
+	}
+#endif
+
+	hPC->hAudioPutList = new CCircleBuffer(32,hPC->Audio10msLength,0);
+	hPC->hAudioGetList = new CCircleBuffer(32,hPC->Audio10msLength,0);
+	
 	if(hPC->hAudioPutList == NULL || hPC->hAudioGetList == NULL){
 		Log3("audio data list init failed.");
 		hPC->audioPlaying = 0;
@@ -1186,7 +1287,10 @@ static void * AudioSendProcess(
 	
 	OPENXL_STREAM * hOSL = NULL;
 	hOSL = InitOpenXLStream(
-		8000,1,1,hVoid,
+		hPC->AudioSampleRate,
+		hPC->AudioChannel,
+		hPC->AudioChannel,
+		hVoid,
 		recordCallback,
 		playerCallback
 		);
@@ -1195,19 +1299,22 @@ static void * AudioSendProcess(
 		Log3("opensl init failed.");
 		hPC->audioPlaying = 0;
 	}
-	
-#endif
 
-	char hFrame[12*AEC_CACHE_LEN] = {0};
-	char hCodecFrame[12*AEC_CACHE_LEN] = {0};
+	char hFrame[4*960] = {0};
+	char hCodecFrame[2*960] = {0};
 
 	AV_HEAD_YUNNI* hAV = (AV_HEAD_YUNNI*)hFrame;
-	int hdrLen = sizeof(AV_HEAD_YUNNI);
-	
 	char * WritePtr = hAV->d;
 
-	int nBytesNeed = 6*AEC_CACHE_LEN;
+	int nBytesNeed = 1920;
+	int nBytesPost = 0;
+	
+#ifdef ENABLE_VAD
 	int nVadFrames = 0;
+#endif
+
+	char speakerData[320] = {0};
+	char captureData[320] = {0};
 	
 	while(hPC->audioPlaying){
 
@@ -1216,148 +1323,124 @@ static void * AudioSendProcess(
 			continue;
 		}
 		
-		if((hPC->hAudioGetList->CheckData() != 1) || (hPC->hAudioPutList->CheckData() != 1)){
-			usleep(10);
-			continue;
-		}
-		AudioData * hCapture = hPC->hAudioGetList->Read();
-		AudioData * hSpeaker = hPC->hAudioPutList->Read();
+		int captureLens = hPC->hAudioGetList->Used();
+		int speakerLens = hPC->hAudioPutList->Used();
 
-		if(hCapture == NULL || hSpeaker == NULL){
-            Log3("audio data lost...");
+		if(captureLens < hPC->Audio10msLength || speakerLens < hPC->Audio10msLength){
 			usleep(10);
 			continue;
 		}
+
+		hPC->hAudioGetList->Get(captureData,hPC->Audio10msLength);
+		hPC->hAudioPutList->Get(speakerData,hPC->Audio10msLength);
+
+		if(hPC->voiceEnabled != 1){
+			usleep(10); 
+			continue;
+		}
 		
-		#ifdef ENABLE_AEC
-				short * hAecCapturePCM = hCapture->buf;
-				short * hAecSpeakerPCM = hSpeaker->buf;
 		
-				if (audio_echo_cancellation_farend(hAEC,(char*)hAecSpeakerPCM,80) != 0){
-						Log3("WebRtcAecm_BufferFarend() failed.");
-				}
-				
-				if (audio_echo_cancellation_proc(hAEC,(char*)hAecCapturePCM,(char*)WritePtr,80) != 0){
-						Log3("WebRtcAecm_Process() failed.");
-				}
-		#else
-				memcpy(WritePtr,hCapture->buf,80*sizeof(short));
-		#endif
+#ifdef ENABLE_AEC
+		if (audio_echo_cancellation_farend(hAEC,(char*)speakerData,hPC->Audio10msLength/sizeof(short)) != 0){
+				Log3("WebRtcAecm_BufferFarend() failed.");
+		}
 		
-		#ifdef ENABLE_NSX_O
-				audio_nsx_proc(hNsx,WritePtr);
-		#endif
-		
-		#ifdef ENABLE_VAD
-		
-				int logration = audio_vad_proc(hVad,WritePtr,80);
-		
-				if(logration < 1024){
-		//			Log3("audio detect vad actived:[%d].\n",logration);
-					nVadFrames ++;
-				}else{
-					nVadFrames = 0;
-				}
-		#endif
-		
-		hAV->len += AEC_CACHE_LEN;
-		WritePtr += AEC_CACHE_LEN;
-		
+		if (audio_echo_cancellation_proc(hAEC,(char*)captureData,(char*)WritePtr,hPC->Audio10msLength/sizeof(short)) != 0){
+				Log3("WebRtcAecm_Process() failed.");
+		}
+#else
+		memcpy(WritePtr,captureData,hPC->Audio10msLength);
+#endif
+
+#ifdef ENABLE_NSX_O
+		audio_nsx_proc(hNsx,WritePtr,hPC->Audio10msLength);
+#endif
+
+#ifdef ENABLE_VAD
+		int logration = audio_vad_proc(hVad,WritePtr,hPC->Audio10msLength);
+
+		if(logration < 1024){
+//			Log3("audio detect vad actived:[%d].\n",logration);
+			nVadFrames ++;
+		}else{
+			nVadFrames = 0;
+		}
+#endif
+
+		hAV->len += hPC->Audio10msLength;
+		WritePtr += hPC->Audio10msLength;
+
 		if(hAV->len < nBytesNeed){
 			continue;
 		}
-		
-		#ifdef ENABLE_VAD
-			if(nVadFrames > 300){
-				Log3("audio detect vad actived.\n");
-				hAV->len = 0;
-				WritePtr = hAV->d;
-#if 1
-				memset(sendBuf,0,1024);
-				sendLen=0;
-				usleep(10000);
-#endif
-				continue;
-			}
-		#endif
 
-		iRet= audio_enc_process(hCodec,hAV->d,hAV->len,hCodecFrame,sizeof(hCodecFrame));
-		
-		if(iRet < 2){
-				Log3("audio encode failed with error:%d.\n",iRet);
-				hAV->len = 0;
-				WritePtr = hAV->d;
-				continue;
+		ret = audio_enc_process(
+            hCodec,
+            hAV->d,
+            hAV->len,
+            hCodecFrame,
+            sizeof(hCodecFrame));
+        
+		if(ret < 2){
+			Log3("audio encode failed with error:%d.\n",ret);
+			hAV->len = 0;
+			WritePtr = hAV->d;
+			continue;
 		}
 		
 		struct timeval tv = {0,0};
-		gettimeofday(&tv,NULL);		
-		pts = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+		gettimeofday(&tv,NULL);	
+		int pts = (tv.tv_sec * 1000) + (tv.tv_usec / 1000);
+
+		hAV->startcode = 0xa815aa55;
 		hAV->streamid = 1;
 		hAV->audiocodec = hPC->AudioSendFormat;
-		hAV->sectime=pts/1000000;
-		hAV->militime=pts/1000;
-		hAV->len = iRet;
-		hAV->frameno = frameno;
+		hAV->sectime= pts/1000000;
+		hAV->militime= pts/1000;
+		hAV->len = ret;
+		hAV->frameno = frameno++;
+		
 		memcpy(hAV->d,hCodecFrame,hAV->len);
 
-	//	Log3("encode size:[%d],all size:[%d]\n",hAV->len,(hAV->len)+hdrLen);
-	/*
-		iRet=PPPP_IndeedWrite(hPC->sessionID,P2P_CHANNEL_AUDIO,(char *)hAV,(hAV->len)+hdrLen);
-
-		if(iRet < 0){
-			Log3("PPPP_IndeedWrite ----------->Fail  ");
+		nBytesPost = sizeof(AV_HEAD_YUNNI) + hAV->len;
+		
+		ret = PPPP_IndeedWrite(hPC->sessionID,P2P_CHANNEL_AUDIO,(char*)hAV,nBytesPost);
+		
+		if(ret < 0){
+			Log3("PPPP_IndeedWrite ----------->Failed\n");
 			break;
+		}else if (ret != nBytesPost){
+			Log3("PPPP_IndeedWrite ----------->unfinished[ret=%d,want=%d]\n",ret,nBytesPost);
 		}
 
+//		Log3("audio send data with codec:[%02X] length:[%04d] bytes.",hAV->audiocodec,nBytesPost);
+
 		hAV->len = 0;
-		WritePtr = hAV->d;		
-	*/
-		memcpy(sendBuf+sendLen,(char *)hAV,(hAV->len)+hdrLen);
-		sendLen+=(hAV->len)+hdrLen;
-		hAV->len = 0;
-		WritePtr = hAV->d;	
-		frameno++;
-		if (sendLen>=1024){
-			iRet=PPPP_IndeedWrite(hPC->sessionID,P2P_CHANNEL_AUDIO,sendBuf,sendLen);
-			if(iRet < 0){
-				Log3("PPPP_IndeedWrite ----------->Failed\n");
-				break;
-				}
-			else if (iRet!=sendLen){
-				Log3("PPPP_IndeedWrite ----------->unfinished[ret=%d,want=%d]\n",iRet,sendLen);
-				}
-			memset(sendBuf,0,1024);
-			sendLen=0;
-			}
-		else{
-			continue;
-		}
+		WritePtr = hAV->d;
 	}
-		FreeOpenXLStream(hOSL);
-		hOSL = NULL;
 	
-		audio_enc_free(hCodec);
-	
-		#ifdef ENABLE_AEC
-			audio_echo_cancellation_free(hAEC);
-		#endif
-	
-		#ifdef ENABLE_NSX_O
-			audio_nsx_free(hNsx);
-		#endif
-	
-		#ifdef ENABLE_VAD
-			audio_vad_free(hVad);
-		#endif
-	
-	PUT_LOCK(&hPC->audioSendThreadLock);
+	FreeOpenXLStream(hOSL);
+	hOSL = NULL;
+
+	audio_enc_free(hCodec);
+
+#ifdef ENABLE_AEC
+	audio_echo_cancellation_free(hAEC);
+#endif
+
+#ifdef ENABLE_NSX_O
+	audio_nsx_free(hNsx);
+#endif
+
+#ifdef ENABLE_VAD
+	audio_vad_free(hVad);
+#endif
 
 	if(hPC->hAudioPutList) delete hPC->hAudioPutList;
 	if(hPC->hAudioGetList) delete hPC->hAudioGetList;
 	
-		hPC->hAudioPutList = NULL;
-		hPC->hAudioGetList = NULL;
+	hPC->hAudioPutList = NULL;
+	hPC->hAudioGetList = NULL;
 		
 	Log3("AudioSendProcess exit.\n");
 
@@ -1374,54 +1457,130 @@ void * RecordingProcess(void * Ptr){
 
 	Log2("current thread id is:[%d].",gettid());
 
-	CPPPPChannel * hClass = (CPPPPChannel*)Ptr;
-	if(hClass == NULL){
+	CPPPPChannel * hPC = (CPPPPChannel*)Ptr;
+	if(hPC == NULL){
 		Log2("Invalid channel class object.");
 		return NULL;
 	}
 
 	long long   ts = 0;
+
+	int nFrame = 0;
 	int nBytesRead = 0;
-	int nBytesHave = 0;
 
-	AV_HEAD * hFrm = (AV_HEAD*)malloc(128*1024);
+	int firstKeyFrameComming = 0;
+	
+#ifdef ENABLE_VIDEO_RECORD_FIX 
+	int sts = time(NULL);
+	int pts = 0;
+	int fps = 0;
+	int fix = 0;
+#endif
+//	int	isKeyFrame = 0;
+	
+	hPC->hAudioBuffer->Clear();
+	hPC->hVideoBuffer->Clear();
 
-	hClass->hAudioBuffer->Reset();
-	hClass->hVideoBuffer->Reset();
+	AV_HEAD * pVFrm = (AV_HEAD*)malloc(hPC->YUVSize/3);
+	AV_HEAD * pAFrm = (AV_HEAD*)malloc(hPC->AudioSaveLength + sizeof(AV_HEAD));
 
-	hClass->aIdx = 0;
-	hClass->vIdx = 0;
+	pAFrm->len = hPC->AudioSaveLength;
 
-	while(hClass->avExit){
-		int aBytesHave = hClass->hAudioBuffer->GetStock();
-		int vBytesHave = hClass->hVideoBuffer->GetStock();
-		
-		if(vBytesHave > (int)(sizeof(AV_HEAD))){
-			nBytesRead = hClass->hVideoBuffer->Read(hFrm,sizeof(AV_HEAD));
-			while((nBytesHave = hClass->hVideoBuffer->GetStock()) < hFrm->len){
-				Log3("wait video recording buffer arriver size:[%d] now:[%d].",hFrm->len,nBytesHave);
-				usleep(10); continue;
-			}
-			nBytesRead = hClass->hVideoBuffer->Read(hFrm->d,hFrm->len);
-			hClass->WriteRecorder(hFrm->d,hFrm->len,1,hFrm->type,ts);
+	while(hPC->recordingExit){
 
-//			Log3("video frame write size:[%d].\n",hFrm->len);
+		int Type = WriteFrameType();
+
+		if(Type < 0){
+			usleep(10); continue;
 		}
 
-		if(aBytesHave >= 640){
-			nBytesRead = hClass->hAudioBuffer->Read(hFrm->d,640);
-			hClass->WriteRecorder(hFrm->d,nBytesRead,0,0,ts);
+		if(Type){
+			int vBytesHave = hPC->hVideoBuffer->Used();
+			
+			if(vBytesHave > (int)(sizeof(AV_HEAD))){
+				nBytesRead = hPC->hVideoBuffer->Get((char*)pVFrm,sizeof(AV_HEAD));
 
-//			Log3("audio frame write size:[%d].\n",nBytesRead);
+				if(pVFrm->startcode != 0xa815aa55){
+					Log3("invalid video frame lens:[%d].",pVFrm->len);
+					hPC->hVideoBuffer->Clear();
+					usleep(10); continue;
+				}
+
+				if(pVFrm->type == 0){
+					firstKeyFrameComming = 1;
+				}
+
+				if(firstKeyFrameComming != 1){
+					hPC->hVideoBuffer->Mov(pVFrm->len);
+					continue;
+				}else{
+					nBytesRead = hPC->hVideoBuffer->Get(pVFrm->d,pVFrm->len);
+				}
+
+				hPC->WriteRecorder(
+					pVFrm->d,pVFrm->len,
+					1,
+					pVFrm->type,
+					ts);
+
+				nFrame++;
+			}else{
+#ifdef ENABLE_VIDEO_RECORD_FIX                
+                if(pts <= 5) continue;
+                if(fix == 0 || firstKeyFrameComming != 1){
+                    continue;
+                }
+			
+				Log3("recording fps:[%d] lost frame count:[%d] auto fix.\n",fps,fix);
+
+				for(int i = 0;i < fix;i++){
+					hPC->WriteRecorder(
+						pVFrm->d,128,
+						1,
+						0,
+						ts
+						);
+				}
+
+				nFrame += fix;
+#endif
+			}
+#ifdef ENABLE_VIDEO_RECORD_FIX 
+			pts = time(NULL) - sts;
+			pts = pts > 0 ? pts : 1;
+			
+			fps = nFrame / pts;
+			
+			fix = hPC->FPS - fps;
+			fix = fix > 0 ? fix : 0;
+#endif	
+		}else{
+            if(firstKeyFrameComming != 1){
+                continue;
+            }
+
+#ifdef ENABLE_AUDIO_RECORD
+			int aBytesHave = hPC->hAudioBuffer->Used();
+			
+			if(aBytesHave > pAFrm->len){
+				nBytesRead = hPC->hAudioBuffer->Get(pAFrm->d,pAFrm->len);
+				hPC->WriteRecorder(pAFrm->d,nBytesRead,0,0,ts);
+			}else{
+				memset(pAFrm->d,0,pAFrm->len);
+				hPC->WriteRecorder(pAFrm->d,pAFrm->len,0,0,ts);
+			}
+#endif
 		}
 	}
 
-	free(hFrm); hFrm = NULL;
+	free(pAFrm); pAFrm = NULL;
+	free(pVFrm); pVFrm = NULL;
 
 	Log3("stop recording process done.");
 	
 	return NULL;
 }
+
 
 static void * MediaExitProcess(
 	void * hVoid
@@ -1457,6 +1616,7 @@ static void * MediaExitProcess(
 
 	GET_LOCK(&hPC->SessionStatusLock);
 	hPC->SessionStatus = STATUS_SESSION_IDLE;
+	Log3("SESSION STATUS:IDLE");
 	PUT_LOCK(&hPC->SessionStatusLock);
 	
 	Log3("CloseMediaStreams Process finished ... ");
@@ -1488,11 +1648,8 @@ CPPPPChannel::CPPPPChannel(
 	iocmdRecving = 0;
 	
     videoPlaying = 0;
-	INT_LOCK(&videoRecvThreadLock);
 
 	audioPlaying = 0;
-	INT_LOCK(&audioRecvThreadLock);
-	INT_LOCK(&audioSendThreadLock);
 	voiceEnabled = 0;
 	audioEnabled = 0;
 	mediaEnabled = 0;
@@ -1500,9 +1657,6 @@ CPPPPChannel::CPPPPChannel(
 	
     fileRecving=0;
 	fileRecvThread= (pthread_t)-1;
-	INT_LOCK(&fileRecvThreadLock);
-	INT_LOCK(&DataWriteThreadLock);
-	
 	mediaCoreThread = (pthread_t)-1;
 	iocmdSendThread = (pthread_t)-1;
 	iocmdRecvThread = (pthread_t)-1;
@@ -1513,53 +1667,26 @@ CPPPPChannel::CPPPPChannel(
 
 	deviceType = -1;
 
+	recordingExit = 0;
 	avIdx = spIdx = sessionID = -1;
 
     SID = -1;
 
-	hAudioStream = NULL;
-	hVideoStream = NULL;
-	hAVFmtOutput = NULL;
-    hAVFmtContext = NULL;
-    hAVCodecContext = NULL;
-	hRecordFile = NULL;
-
-	vIdx = aIdx = 0;
+	AudioSaveLength = 0;
+	Audio10msLength = 0;
 
 	MW = 1920;
 	MH = 1080;
 	YUVSize = (MW * MH) + (MW * MH)/2;
+	MWCropSize = 0;
+	MHCropSize = 0;
 
-	hAudioBuffer = new CCircleBuf();
-	hVideoBuffer = new CCircleBuf();
-	hSoundBuffer = new CCircleBuf();
-	hIOCmdBuffer = new CCircleBuf();
+	hAudioBuffer = new CCircleBuffer( 128 * 1024);
+	hSoundBuffer = new CCircleBuffer( 128 * 1024);
+	hVideoBuffer = new CCircleBuffer(4096 * 1024);
+	hIOCmdBuffer = new CCircleBuffer(COMMAND_BUFFER_SIZE);
 	
-    if(!hIOCmdBuffer->Create(COMMAND_BUFFER_SIZE)){
-		while(1){
-			Log2("create iocmd procssing buffer failed.\n");
-		}
-	}
-	
-	if(!hAudioBuffer->Create(512 * 1024)){
-		while(1){
-			Log2("create audio recording buffer failed.\n");
-		}
-	}
-
-	if(!hSoundBuffer->Create(512 * 1024)){
-		while(1){
-			Log2("create sound procssing buffer failed.\n");
-		}
-	}
-
-	if(!hVideoBuffer->Create((3*1024*1024))){
-		while(1){
-			Log2("create video recording buffer failed.\n");
-		}
-	}
-
-	INT_LOCK(&AviDataLock);
+	INT_LOCK(&CaptureLock);
 	INT_LOCK(&DisplayLock);
 	INT_LOCK(&SndplayLock);
 	
@@ -1567,13 +1694,10 @@ CPPPPChannel::CPPPPChannel(
 	
 	GET_LOCK(&SessionStatusLock);
 	SessionStatus = STATUS_SESSION_DIED;
+	Log3("SESSION STATUS:DIED");
 	PUT_LOCK(&SessionStatusLock);
 
-	INT_LOCK(&cmdRecvThreadLock);
-	INT_LOCK(&audioPlayThreadLock);
-	INT_LOCK(&audioSendThreadLock);
-	INT_LOCK(&videoRecvThreadLock);
-	INT_LOCK(&videoPlayThreadLock);
+	hDec = new CH264Decoder();
 
 }
 
@@ -1582,18 +1706,14 @@ CPPPPChannel::~CPPPPChannel()
     Log3("start free class pppp channel:[0] start.");
 	
     Log3("start free class pppp channel:[1] close p2p connection and threads."); 
+	
 	Close();
-
-	hAudioBuffer->Release();
-	hVideoBuffer->Release();
-	//hSoundBuffer->Release();
-	hIOCmdBuffer->Release();
 
 	Log3("start free class pppp channel:[2] free buffer.");
 
 	delete(hAudioBuffer);
 	delete(hVideoBuffer);
-//	delete(hSoundBuffer);
+	delete(hSoundBuffer);
 	delete(hIOCmdBuffer);
 	
 /*
@@ -1604,18 +1724,22 @@ CPPPPChannel::~CPPPPChannel()
 */
     Log3("start free class pppp channel:[3] free lock.");
 
-	DEL_LOCK(&AviDataLock);
+	DEL_LOCK(&CaptureLock);
 	DEL_LOCK(&DisplayLock);
 	DEL_LOCK(&SndplayLock);
 	DEL_LOCK(&SessionStatusLock);
+
+	if(hDec) delete(hDec); hDec = NULL;
     
     Log3("start free class pppp channel:[4] close done.");
 }
+
 void CPPPPChannel::MsgNotify(
     JNIEnv * hEnv,
     int MsgType,
     int Param
 ){
+	Log3("get callback lock from MsgNotify");
     GET_LOCK( &g_CallbackContextLock );
     if(g_CallBack_Handle != NULL && g_CallBack_ConnectionNotify!= NULL){
         jstring jsDID = ((JNIEnv *)hEnv)->NewStringUTF(szDID);
@@ -1623,6 +1747,7 @@ void CPPPPChannel::MsgNotify(
         ((JNIEnv *)hEnv)->DeleteLocalRef(jsDID);
     }
 	PUT_LOCK( &g_CallbackContextLock );
+	Log3("put callback lock from MsgNotify");
 }
 
 int CPPPPChannel::StartFileRecvThread()
@@ -1692,7 +1817,6 @@ int CPPPPChannel::SetSystemParams_yunni(
     exSendCmd_t extCmdHead;
 	char buf[1024]={0,};
 	
-	Log3("1---AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA--cmd[%02x]\n",cmdType);
 	//本地需要作处理的命令
 	switch(cmdType){
 		case CMD_DATACTRL_AUDIO_START:
@@ -1723,10 +1847,25 @@ int CPPPPChannel::SetSystemParams_yunni(
 				return -1;
 			}
 			SessionStatus = STATUS_SESSION_PLAYING;
+			Log3("SESSION STATUS:PLAY");
 			PUT_LOCK(&SessionStatusLock);
 			mediaEnabled = 1;
 			StartVideoChannel();
 		 	break;
+		case CMD_DATACTRL_PLAYBACK_STOP:
+			
+			mediaEnabled = 0;
+			videoPlaying = 0;   
+			Log3("stop video process.");
+			
+		//	if(videoRecvThread != -1) pthread_join(videoRecvThread,NULL);
+		//	if(videoPlayThread != -1) pthread_join(videoPlayThread,NULL);
+
+			GET_LOCK(&SessionStatusLock);
+				SessionStatus = STATUS_SESSION_IDLE;
+			PUT_LOCK(&SessionStatusLock);
+
+			break;
 			
 		}
 
@@ -1739,22 +1878,18 @@ int CPPPPChannel::SetSystemParams_yunni(
 		Log3("ret[%d:%d]---[%04x]",sessionID,nRet,cmdType);
 		return nRet;
 	}
-	
-	Log3("3---AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");	
+		
 	memcpy(buf,&extCmdHead,extCmdLen);;
 	if (NULL!=cmdContent){
 		memcpy(buf+extCmdLen,cmdContent,cmdLen);
 	}
-	
-	Log3("4---AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 
 	nRet=PPPP_IndeedWrite(sessionID,P2P_CHANNEL_CMMND,buf,cmdLen+extCmdLen);
 	
-	Log3("5---AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA %d \n",nRet);
 	return 0;
 }
 
-void CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
+int  CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
 {
    // F_LOG;
 	Log3("PPPP_Connect begin...%s\n svrstr:%s\n", szDID,szServer);
@@ -1769,7 +1904,7 @@ void CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
 		if (sessionID==ERROR_PPPP_SERVER_CHANGED){
 			Log3("server changed, svr:%s\n",(svrStr==NULL)?"null":svrStr);
 			if (svrStr!=NULL)free(svrStr);
-			return;
+			return -1;
 			}
 		
 		switch(sessionID)
@@ -1813,14 +1948,15 @@ void CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
 		}
 		Log3("sessionID[%d]MsgNotify:msgType=%d,iMsgContent=%d\n",sessionID,msgType,iMsgContent);
 		MsgNotify(env,msgType,iMsgContent);
-		return;
+		Log3("UILayer status set done");
+		return -1;
 	}
 	
 
 	/* 获取pppp session 信息 */
 	st_PPPP_Session1 SInfo;
 	if(PPPP_Check(sessionID, &SInfo) != ERROR_PPPP_SUCCESSFUL){
-	   return;
+	   return -1;
 	}
 	//发送验证信息
 
@@ -1830,7 +1966,7 @@ void CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
 		//首次添加默认未登陆状态
 		iMsgContent=PPPP_STATUS_USER_NOT_LOGIN;
 		MsgNotify(env,msgType,iMsgContent);
-		return;
+		return -2;
 	}
 	
 	user_t userParam;
@@ -1842,6 +1978,8 @@ void CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
 	sprintf(Cgi,"name=%.32s&password=%.128s&",userParam.name,userParam.pass);
 	Log3("sprintf Cgi result is : %s ",Cgi);
 	SendCmds(sessionID,CMD_SYSTEM_USER_CHK,Cgi,(void *)this);
+
+	return 0;
 }
 
 void CPPPPChannel::ConnectUserCheckAcK(
@@ -1898,302 +2036,11 @@ void CPPPPChannel::ConnectUserCheckAcK(
 		return;
 	}
 }
-void CPPPPChannel::ProcessCommand_EX(JNIEnv * env,int gwChannel,int cmd, char *pbuf, int len){
-	
-	Log3("cmd=%04x,len=%d",cmd,len);
-	
-	if(cmd == CMD_SYSTEM_USER_CHK){
-		ConnectUserCheckAcK(env,pbuf, len);
-		Log3("ConnectUserCheckAcK,len=%d",len);
-		return;
-	}
-	
-	GET_LOCK(&g_CallbackContextLock);
-    jbyteArray jBuff=NULL;
-	jstring jdid = NULL;
-    if(g_CallBack_Handle != NULL)
-    {     
-        jdid = env->NewStringUTF(szDID);
-	#ifdef PLATFORM_ANDROID
-		jBuff = env->NewByteArray(len);	
-		env->SetByteArrayRegion(jBuff, 0,len,(jbyte*)pbuf);
-		
-		env->CallVoidMethod(g_CallBack_Handle, g_CallBack_CmdRecv, jdid, sessionID,cmd,jBuff, len);
-
-		env->DeleteLocalRef(jBuff);
-	#else
-		env->CallVoidMethod(g_CallBack_Handle, g_CallBack_CmdRecv, jdid, sessionID,cmd,pbuf, len);
-	#endif
-	
-        env->DeleteLocalRef(jdid);
-    }
-	
-	PUT_LOCK(&g_CallbackContextLock);
-	
-	return;
-
-}
-
-void CPPPPChannel::ProcessCommand(JNIEnv * env,int gwChannel,int cmd, char *pbuf, int len)
-{
-	//Log2("cmd=%04x,len=%d",cmd,len);
-	char MsgStr[4096] = {0};
-	if(cmd == CMD_SYSTEM_USER_CHK){
-		ConnectUserCheckAcK(env,pbuf, len);
-		Log3("ConnectUserCheckAcK,len=%d",len);
-		return;
-		
-	}
-
-	else if(cmd == CMD_NOTIFICATION || cmd == CMD_ALARM_NOTIFICATION){
-		
-		xqAlarm_t * xqALARM_T = (xqAlarm_t *)pbuf;
-		
-		char sTIME[64] = {0};
-		char sTYPE[16] = {0};
-		
-		const char * wday[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-		struct tm stm;
-		struct tm * p = &stm;
-		time_t t;
-		time(&t);
-		p = localtime_r(&t,&stm);				
-		sprintf(sTIME,
-				"%04d-%02d-%02d-%s-%02d-%02d-%02d",
-				1900+p->tm_year,
-				p->tm_mon + 1,
-				p->tm_mday,
-				wday[p->tm_wday],
-				p->tm_hour,
-				p->tm_min,
-				p->tm_sec);
-		sprintf(sTYPE,"%d",xqALARM_T->alarmType);
-		
-		AlarmNotifyDoorBell(env,szDID,sTYPE,sTIME);
-		Log3("ConnectUserCheckAcK,len=%d",len);
-		return;
-	}else if(cmd == CMD_LOG_GET){
-		if(pbuf == NULL||len< sizeof(cmdHead_t)){
-			sprintf(MsgStr,"%s","LogOver"); //获取停止标识
-			goto JumpCallBack;
-		}
-		
-		int LogNum = 0;
-		LogNum = (len-sizeof(cmdHead_t))/sizeof(LogInfo_t);
-		Log3("App Cmd Recv headlen =======>%d",LogNum);
-		
-		if(LogNum != 0){ 
-			
-			LogInfo_t logInfo[LogNum];
-			memset(logInfo,0,sizeof(LogInfo_t)*LogNum);
-			memcpy(logInfo,(pbuf+sizeof(cmdHead_t)),sizeof(LogInfo_t)*LogNum);	
-			int i;
-			for(i=0;i<LogNum;i++){
-				sprintf(MsgStr,"{\"%s\":\"%d\",\"%s\":\"%d\",\"%s\":\"%d\",\"%s\":\"%d\",\"%s\":\"%s\"}",
-					"mainType",logInfo[i].mainType,
-					"subType",logInfo[i].subType,
-					"length",logInfo[i].length,
-					"timeStamp",logInfo[i].timeStamp,
-					"content",logInfo[i].content
-					);
-				if(strlen(MsgStr) == 72){  //无效数据字符串长度为72
-					sprintf(MsgStr,"%s","LogOver"); //获取停止标识
-					goto JumpCallBack;
-				}
-				GET_LOCK(&g_CallbackContextLock);
-			    if(g_CallBack_Handle != NULL)
-			    {   
-
-					jstring	jstring_did = env->NewStringUTF(szDID);
-			        jstring jstring_msg = env->NewStringUTF(MsgStr);
-						
-					env->CallVoidMethod(g_CallBack_Handle,g_CallBack_UILayerNotify,jstring_did,cmd,jstring_msg);
-
-					env->DeleteLocalRef(jstring_did); 
-			        env->DeleteLocalRef(jstring_msg);
-		    	}
-				PUT_LOCK(&g_CallbackContextLock);
-			}
-		}else{
-			sprintf(MsgStr,"%s","LogOver"); //获取停止标识
-			goto JumpCallBack;
-		}
-		sprintf(MsgStr,"%s","LogOver"); //获取停止标识
-	}else if(cmd == CMD_DATACTRL_FILELIST_GET){
-
-		if(pbuf == NULL||len< sizeof(cmdHead_t)){
-			sprintf(MsgStr,"%s","FileOver"); //获取停止标识
-			goto JumpCallBack;
-		}
-		
-		int FileNum = 0;
-		FileNum = (len - sizeof(cmdHead_t)+4)/sizeof(xqFile_t);
-		if(FileNum != 0){
-			xqFile_t xqfile[FileNum];
-			memset(xqfile,0,sizeof(xqFile_t)*FileNum);
-			memcpy(xqfile,pbuf+sizeof(cmdHead_t)-4,sizeof(xqFile_t)*FileNum);
-			int i;
-			for(i=0;i<FileNum;i++){
-				sprintf(MsgStr,"{\"%s\":\"%d\",\"%s\":\"%u\",\"%s\":\"%u\",\"%s\":\"%s\"}",
-					"type",xqfile[i].type,
-					"size",xqfile[i].size,
-					"timeStamp",xqfile[i].timeStamp,
-					"name",xqfile[i].name
-					);
-				GET_LOCK(&g_CallbackContextLock);
-			    if(g_CallBack_Handle != NULL)
-			    {   
-
-					jstring	jstring_did = env->NewStringUTF(szDID);
-			        jstring jstring_msg = env->NewStringUTF(MsgStr);
-						
-					env->CallVoidMethod(g_CallBack_Handle,g_CallBack_UILayerNotify,jstring_did,cmd,jstring_msg);
-
-					env->DeleteLocalRef(jstring_did); 
-			        env->DeleteLocalRef(jstring_msg);
-		    	}
-				PUT_LOCK(&g_CallbackContextLock);
-			}
-		}else{
-			sprintf(MsgStr,"%s","FileOver"); //获取停止标识
-			goto JumpCallBack;
-		}
-		sprintf(MsgStr,"%s","FileOver"); //获取停止标识
-	}else if(cmd == CMD_SD_RECORDFILE_GET){
-
-		if(pbuf == NULL || len <= 4){
-			sprintf(MsgStr,"%s","RecOver"); //获取停止标识
-			goto JumpCallBack;
-		}
-		//返回数据为字符串
-		int RecordCount = 0;
-		char MaxRecNum[8] = {0};
-		ResolveData(MaxRecNum,pbuf+4,"RecordCount=",";");
-		RecordCount = atoi(MaxRecNum);
-		Log3("App Cmd Recv Get RecordCount =======>%d",RecordCount);
-		int i;
-		for(i=0;i<RecordCount;i++){
-			char Rec_name[32] = {0};
-			char Rec_size[32]  = {0};
-			char Rec_name_spf[32] = {0};
-			sprintf(Rec_name_spf,"%s%d%s","record_name0[",i,"]=");
-			char Rec_size_spf[32] = {0};
-			sprintf(Rec_size_spf,"%s%d%s","record_size0[",i,"]=");
-			ResolveData(Rec_name,pbuf+4,Rec_name_spf,";");
-			ResolveData(Rec_size,pbuf+4,Rec_size_spf,";");
-			
-			sprintf(MsgStr,"{\"%s\":\"%s\",\"%s\":\"%s\"}",
-					"Rec_name",Rec_name,
-					"Rec_size",Rec_size
-					);
-			GET_LOCK(&g_CallbackContextLock);
-			    if(g_CallBack_Handle != NULL)
-			    {   
-
-					jstring	jstring_did = env->NewStringUTF(szDID);
-			        jstring jstring_msg = env->NewStringUTF(MsgStr);
-						
-					env->CallVoidMethod(g_CallBack_Handle,g_CallBack_UILayerNotify,jstring_did,cmd,jstring_msg);
-
-					env->DeleteLocalRef(jstring_did); 
-			        env->DeleteLocalRef(jstring_msg);
-		    	}
-			PUT_LOCK(&g_CallbackContextLock);
-		}
-		sprintf(MsgStr,"%s","RecOver"); //获取停止标识
-	}else if(cmd == CMD_DATACTRL_PLAYBACK_STOP){
-	
-		mediaEnabled = 0;
-		videoPlaying = 0;   
-		Log3("stop video process.");
-		
-	//	if(videoRecvThread != -1) pthread_join(videoRecvThread,NULL);
-	//	if(videoPlayThread != -1) pthread_join(videoPlayThread,NULL);
-
-		GET_LOCK(&SessionStatusLock);
-			SessionStatus = STATUS_SESSION_IDLE;
-		PUT_LOCK(&SessionStatusLock);
-
-		return;
-	}else if(cmd == CMD_NET_WIFI_SCAN){
-		int ScanNum = 0;
-		if(pbuf == NULL || len <= sizeof(cmdHead_t)){
-			sprintf(MsgStr,"%s","WIFIOver"); //获取停止标识
-			goto JumpCallBack;
-		}
-		ScanNum = (len - 4)/sizeof(wifiScanRet_t);
-		Log3("WIFIList Scanner ScanNum =============>%d",ScanNum);
-		wifiScanRet_t wifiScanRet[ScanNum];
-		memset(wifiScanRet,0,sizeof(wifiScanRet_t)*ScanNum);
-		memcpy(wifiScanRet,pbuf + 4,sizeof(wifiScanRet_t)*ScanNum);
-		int i;
-		for(i=0;i<ScanNum;i++){
-			sprintf(MsgStr,"{\"%s\":\"%s\",\"%s\":\"%d\",\"%s\":\"%d\",\"%s\":\"%d\",\"%s\":\"%d\",\"%s\":\"%d\"}",
-					"ssid",wifiScanRet[i].ssid,
-					"security",wifiScanRet[i].security,
-					"dbm0",wifiScanRet[i].dbm0,
-					"dbm1",wifiScanRet[i].dbm1,
-					"mode",wifiScanRet[i].mode,
-					"channel",wifiScanRet[i].channel
-					);
-			Log3("WIFIList Scanner Result ===========>%s",MsgStr);
-			GET_LOCK(&g_CallbackContextLock);
-			    if(g_CallBack_Handle != NULL)
-			    {   
-
-					jstring	jstring_did = env->NewStringUTF(szDID);
-			        jstring jstring_msg = env->NewStringUTF(MsgStr);
-						
-					env->CallVoidMethod(g_CallBack_Handle,g_CallBack_UILayerNotify,jstring_did,cmd,jstring_msg);
-
-					env->DeleteLocalRef(jstring_did); 
-			        env->DeleteLocalRef(jstring_msg);
-		    	}
-			PUT_LOCK(&g_CallbackContextLock);
-		}
-		sprintf(MsgStr,"%s","WIFIOver"); //获取停止标识
-	}else{
-		Rsp2Json(cmd,pbuf+4,MsgStr,sizeof(MsgStr));
-	}
-JumpCallBack:
-
-	GET_LOCK(&g_CallbackContextLock);
-	
-	    if(g_CallBack_Handle != NULL)
-	    {   
-
-			jstring	jstring_did = env->NewStringUTF(szDID);
-	        jstring jstring_msg = env->NewStringUTF(MsgStr);
-				
-		//	env->CallVoidMethod(g_CallBack_Handle, g_CallBack_CmdRecv, jstring_did, sessionID,cmd,pbuf, len);
-			env->CallVoidMethod(g_CallBack_Handle,g_CallBack_UILayerNotify,jstring_did,cmd,jstring_msg);
-
-			env->DeleteLocalRef(jstring_did); 
-			env->DeleteLocalRef(jstring_msg); 
-	    }
-		
-	PUT_LOCK(&g_CallbackContextLock);
-
-	return;
-}
 
 int CPPPPChannel::PPPPClose()
 {
 	Log3("close connection by did:[%s] called.",szDID);
-#ifdef TUTK_PPPP
-	IOTC_Connect_Stop_BySID(sessionID);
 
-	if(SID >= 0 || avIdx >= 0 || spIdx >= 0){
-		Log3("close connection with session:[%d] avIdx:[%d] did:[%s].",SID,avIdx,szDID);
-		
-		avClientExit(SID,avIdx);
-		avClientStop(avIdx);	// stop audio and video recv from device
-		avServExit(SID,spIdx);	// for avServStart block
-		avServStop(spIdx);		// stop audio and video send to device
-		IOTC_Session_Close(sessionID); // close client session handle
-	}
-
-#else
 // yunni p2p 
 	int Ret = 0;
 	if(sessionID >= 0){ 	   
@@ -2202,14 +2049,13 @@ int CPPPPChannel::PPPPClose()
 	 	Ret = PPPP_Break(szDID);
 	}
 	Log3("PPPP Close status value : [%d]  \n",Ret);
-#endif 
 
 	avIdx = spIdx = speakerChannel = SID = sessionID = -1;
 
 	return 0;
 }
 
-int CPPPPChannel::Start()
+int CPPPPChannel::Start(char * usr,char * pwd,char * server)
 {   
     Log3("start pppp connection to device with uuid:[%s].\n",szDID);
 
@@ -2220,6 +2066,7 @@ int CPPPPChannel::Start()
 		return -1;
 	}
 	SessionStatus = STATUS_SESSION_START;
+	Log3("SESSION STATUS:START");
 	PUT_LOCK(&SessionStatusLock);
 
 	StartMediaChannel();
@@ -2231,6 +2078,7 @@ void CPPPPChannel::Close()
 {
 	GET_LOCK(&SessionStatusLock);
 	SessionStatus = STATUS_SESSION_CLOSE;
+	Log3("SESSION STATUS:CLOSE");
 	PUT_LOCK(&SessionStatusLock);
 	
 	mediaLinking = 0;
@@ -2241,6 +2089,7 @@ void CPPPPChannel::Close()
 	}else{
 		GET_LOCK(&SessionStatusLock);
 		SessionStatus = STATUS_SESSION_DIED;
+		Log3("SESSION STATUS:DIED");
 		PUT_LOCK(&SessionStatusLock);
 	}
 
@@ -2275,7 +2124,6 @@ int CPPPPChannel::StartAudioChannel()
 	voiceEnabled = 1;
 	
 	pthread_create(&audioRecvThread,NULL,AudioRecvProcess,(void*)this);
-
 	pthread_create(&audioSendThread,NULL,AudioSendProcess,(void*)this);
 	
     return 1;
@@ -2344,7 +2192,6 @@ int CPPPPChannel::CloseWholeThreads()
 		|| !mediaEnabled 
 		|| !audioPlaying 
 		|| !videoPlaying
-		|| !avExit
 		|| !fileRecving
 	){
 		iocmdSending = 0;
@@ -2352,10 +2199,10 @@ int CPPPPChannel::CloseWholeThreads()
 		mediaEnabled = 0;
     	audioPlaying = 0;
 		videoPlaying = 0;
-		avExit = 0;
 		fileRecving = 0;
 	}
 
+	recordingExit = 0;
 	Log3("stop iocmd process.");
 	
     if(iocmdSendThread != (pthread_t)-1) pthread_join(iocmdSendThread,NULL);
@@ -2396,6 +2243,7 @@ int CPPPPChannel::CloseMediaStreams(
 		return -1;
 	}
 	SessionStatus = STATUS_SESSION_IDLE;
+	Log3("SESSION STATUS:IDLE");
 	PUT_LOCK(&SessionStatusLock);
 	
 	mediaEnabled = 0;
@@ -2410,13 +2258,21 @@ int CPPPPChannel::CloseMediaStreams(
 	
 int CPPPPChannel::StartMediaStreams(
 	const char * url,
+	int audio_sample_rate,
+	int audio_channel,
 	int audio_recv_codec,
 	int audio_send_codec,
-	int video_recv_codec
+	int video_recv_codec,
+	int video_w_crop,
+	int video_h_crop
 ){    
    // F_LOG;	
 	int ret = 0;
-	if(sessionID < 0) return -1;
+	if(sessionID < 0) {
+		Log3("invliad session...");
+		return -1;
+	}
+	
 	GET_LOCK(&SessionStatusLock);
 	if(SessionStatus != STATUS_SESSION_IDLE){
 		Log3("session status is:[%d],can't start living stream.\n",SessionStatus);
@@ -2425,6 +2281,7 @@ int CPPPPChannel::StartMediaStreams(
 		goto jumperr;
 	}
 	SessionStatus = STATUS_SESSION_PLAYING;
+	Log3("SESSION STATUS:PLAY");
 	PUT_LOCK(&SessionStatusLock);
 	
 	Log3("media stream start here.");
@@ -2435,10 +2292,29 @@ int CPPPPChannel::StartMediaStreams(
 	// pppp://usr:pwd@replay/mnt/sdcard/replay/file
 	
 	memset(szURL,0,sizeof(szURL));
+	
+	AudioSampleRate = audio_sample_rate;
+	AudioChannel = audio_channel;
+
+	// only support channel mono, 16bit, 8KHz or 16KHz
+	//   2 is come from 16bits/8bits = 2bytes
+	// 100 is come from 10ms/1000ms
+	Audio10msLength = audio_sample_rate * audio_channel * 2  / 100;
 
 	AudioRecvFormat = audio_recv_codec;
 	AudioSendFormat = audio_send_codec;
 	VideoRecvFormat = video_recv_codec;
+
+	MHCropSize = video_h_crop;
+	MWCropSize = video_w_crop;
+
+	Log3(
+		"audio format info:[\n"
+		"samplerate = %d\n"
+		"channel = %d\n"
+		"length in 10 ms is %d\n"
+		"]\n",
+		AudioSampleRate,AudioChannel,Audio10msLength);
 
 	if(url != NULL){
 		memcpy(szURL,url,strlen(url));
@@ -2456,8 +2332,6 @@ int CPPPPChannel::StartMediaStreams(
     StartVideoChannel();
 	Log3("channel init audio proc.");
 	StartAudioChannel();
-
-	ret = 0;
 
 	return 0;
 	
@@ -2477,7 +2351,7 @@ int CPPPPChannel::SetSystemParams(int type,char * msg,int len)
 	
 	memcpy(hCmds->CgiData,msg,hCmds->CgiLens);
 	
-	return hIOCmdBuffer->Write(AppCmds,sizeof(APP_CMD_HEAD) + hCmds->CgiLens);
+	return hIOCmdBuffer->Put(AppCmds,sizeof(APP_CMD_HEAD) + hCmds->CgiLens);
 }
 
 void CPPPPChannel::AlarmNotifyDoorBell(JNIEnv* hEnv,char *did, char *type, char *time )
@@ -2501,140 +2375,54 @@ void CPPPPChannel::AlarmNotifyDoorBell(JNIEnv* hEnv,char *did, char *type, char 
 	}
 }
 
-/*
-AVFormatContext * hAVFmtContext;
-AVOutputFormat  * hAVFmtOutput;
-AVStream		* hAudioStream;
-AVStream		* hVideoStream;
-AVCodecContext  * hAVCodecContext;
-char * hRecordFile;
-*/
-
 int CPPPPChannel::StartRecorder(
 	int 		W,			// \BF\ED\B6\C8
 	int 		H,			// \B8脽露\C8
 	int 		FPS,		// 脰隆\C2\CA
 	char *		SavePath	// 
 ){
+	if(W == 0 || H == 0){
+		W = this->MW;
+		H = this->MH;
+	}
+
 	int Err = 0;
 
-	AVCodec * hACodec = NULL; 
-	AVCodec * hVCodec = NULL;
+	if(FPS == 0){
+		FPS = this->FPS;
+    }else{
+        this->FPS = FPS;
+    }
 
-	GET_LOCK(&AviDataLock);
+	GET_LOCK(&CaptureLock);
 
-	if(hAVFmtContext){
-		Log3("channel already in recording now.");
-		PUT_LOCK(&AviDataLock);
-		return -1;
-	}
-	
-	hRecordFile  = (char*)malloc(MAX_PATHNAME_LEN);
-	memset(hRecordFile,0,MAX_PATHNAME_LEN);
-	memcpy(hRecordFile,SavePath,strlen(SavePath));
-	
-//	sprintf(hRecordFile,"%s/%d.mp4",SavePath,(int)time(NULL));
-
-	avformat_alloc_output_context2(&hAVFmtContext, NULL, NULL, hRecordFile);
-	hAVFmtOutput = hAVFmtContext->oformat;
-
-	if(!hAVFmtOutput){
-		Log3("initalize av output format failed, filename:%s.",hRecordFile);
+	if(StartRecording(SavePath,FPS,W,H,this->AudioSampleRate,&AudioSaveLength) < 0){
+		Log3("start recording with muxing failed.\n");
 		goto jumperr;
 	}
 
-	hAVFmtOutput->video_codec = AV_CODEC_ID_H264;
-
-	strncpy(hAVFmtContext->filename,hRecordFile,sizeof(hAVFmtContext->filename));
-
-	if(hAVFmtOutput->video_codec != AV_CODEC_ID_NONE){
-		if(add_video_stream(&sVOs,hAVFmtContext,&hVCodec,hAVFmtOutput->video_codec,W,H,30) < 0){
-			Log2("add_video_stream error");
-			goto jumperr;
-		}
-		
-		Log2("add_video_stream OK");
-	}
-
-	if(hAVFmtOutput->audio_codec != AV_CODEC_ID_NONE){
-		if(add_audio_stream(&sAOs,hAVFmtContext,&hACodec,hAVFmtOutput->audio_codec,8000,1) < 0){
-			Log2("add_audio_stream error");
-			goto jumperr;
-		}
-		
-		Log2("add_audio_stream OK");
-	}
-
-	if(open_video(hAVFmtContext,hVCodec,&sVOs,NULL) < 0){
-	 	Log2("open_video error");
-		goto jumperr;
-	}
-	
-	if(open_audio(hAVFmtContext,hACodec,&sAOs,NULL) < 0){
-		Log2("open_audio error");
-		goto jumperr;
-	}
-	
-	vCTS = aCTS = 0;		
-	vLTS = aLTS = 0;		
-	vPTS = aPTS = 0;		
-	
-	sSTS = 0;				
-	vIdx = 0;				
-	aIdx = 0;;				
-
-	aLen = 0;
-
-	Err = avio_open(&hAVFmtContext->pb,hRecordFile,AVIO_FLAG_WRITE);
-	if(Err < 0){
-		Log2("avio_open %s failed with err code:%d.",hRecordFile,Err);
-		goto jumperr;
-	}
-
-	Err = avformat_write_header(hAVFmtContext,NULL);
-	if(Err != 0){
-		Log2("avformat_write_header failed with err code:%d.",Err);
-		goto jumperr;
-	}
-
-	hAudioRecCaches = (char *)malloc(sAOs.st->codec->frame_size*2*2);
-	if(hAudioRecCaches == NULL){
-		Log2("not enough mem for AV recording.");
-		goto jumperr;
-	}
-
-	avExit = 1;
-	memset(&avProc,0,sizeof(avProc));
+	recordingExit = 1;
 
 	Err = pthread_create(
-		&avProc,
+		&recordingThread,
 		NULL,
 		RecordingProcess,
 		this);
 
 	if(Err != 0){
-		Log2("create av recording process failed.");
+		Log3("create av recording process failed.");
+		CloseRecording();
 		goto jumperr;
 	}
 
 	Log3("start recording process done.");
 
-	PUT_LOCK(&AviDataLock);
+	PUT_LOCK(&CaptureLock);
 
 	return  0;
-
+	
 jumperr:
-	if(hAVFmtContext){
-		avformat_free_context(hAVFmtContext);
-		hAVFmtContext = NULL;
-	}
-
-	if(hRecordFile != NULL){
-		free(hRecordFile);
-	}
-	hRecordFile = NULL;
-
-	PUT_LOCK(&AviDataLock);
+	PUT_LOCK(&CaptureLock);
 
 	return -1;
 }
@@ -2646,124 +2434,26 @@ int CPPPPChannel::WriteRecorder(
 	int				FrameType,	// keyframe or not [0|1]
 	long long		Timestamp
 ){
-	if(hAVFmtContext == NULL){
-//		Log2("invalid av format context for wirte operation.");
-		return -1;
-	}
-
-/*
-	if(FrameType == 1){
-		Log3("recording video I frame.");
-	}
-*/
-
-	if(vIdx == 0 && FrameCode == 1 && FrameType != 1){
-		Log3("wait first video key frame for avi recorder.");
-		return -1;
-	}
-
-	if(vIdx == 0 && FrameCode == 0){
-		Log3("wait first video key frame for avi recorder.");
-		return -1;
-	}
-
-	int Err = 0;
-	
-//	AVRational sAVRational = {1,1000};
-	AVPacket   sAVPacket = {0};
-	AVStream * hAVStream = FrameCode ? sVOs.st : sAOs.st;
-	
-	av_init_packet(&sAVPacket);
-
-	struct timeval tv;
-	gettimeofday(&tv,NULL);
-
-//	aCTS = vCTS = tv.tv_sec * 1000 + tv.tv_usec / 1000;
-//	if(sSTS == 0) sSTS = aCTS;
-
-	if(FrameCode){
-/*
-		vPTS = (vCTS - sSTS)/(1000/hAVStream->codec->time_base.den);
-		if((vPTS != 0) && (vPTS <= vLTS)){
-			vPTS = vPTS + 1;
-		}
-		vLTS = vPTS;
-*/
-		sAVPacket.pts = sAVPacket.dts = vIdx;
-		sAVPacket.stream_index = hAVStream->index;
-		sAVPacket.data = (uint8_t*)FrameData;
-		sAVPacket.size = FrameSize;
-		sAVPacket.flags |= FrameType ? AV_PKT_FLAG_KEY : 0;
-		sAVPacket.duration = 0;
-		
-		Err = write_frame(hAVFmtContext, &hAVStream->codec->time_base,hAVStream, &sAVPacket);
-	}else{
-		memcpy(hAudioRecCaches + aLen,FrameData,FrameSize);
-		aLen += FrameSize;
-		if(aLen >= sAOs.st->codec->frame_size*2){
-			write_audio_frame(hAVFmtContext,&sAOs,(uint8_t*)hAudioRecCaches,sAOs.st->codec->frame_size*2,0);
-			aLen -= (sAOs.st->codec->frame_size*2);
-			memcpy(hAudioRecCaches,hAudioRecCaches+sAOs.st->codec->frame_size*2,aLen);
-		}
-	}
-	
-	switch(FrameCode){
-		case 0:
-			aIdx ++;
-			break;
-		case 1:
-			vIdx ++;
-			break;
-	}
-	
-	return 0;
+//	Log3("frame write code and size:[%d][%d].\n",FrameCode,FrameSize);
+	return WriteRecordingFrames((void*)FrameData,FrameSize,FrameCode,FrameType,Timestamp);
 }
 
 int CPPPPChannel::CloseRecorder(){
 
-	GET_LOCK(&AviDataLock);
+	GET_LOCK(&CaptureLock);
 	
-	if(hAVFmtContext == NULL){
-		Log2("invlaid av format context for record close.");
-		PUT_LOCK(&AviDataLock);
-		return -1;
-	}
-
 	Log3("wait avi record process exit.");
-	avExit = 0;
-	pthread_join(avProc,NULL);
+	recordingExit = 0;
+	if((long)recordingThread != -1){
+		pthread_join(recordingThread,NULL);
+		recordingThread = (pthread_t)-1;
+	}
 	Log3("avi record process exit done.");
 
-	av_write_trailer(hAVFmtContext);
+	CloseRecording();
 
-	/*
-	int i = 0;
-	for(i;i<hAVFmtContext->nb_streams;i++){
-		avcodec_free_context(&hAVFmtContext->streams[i]->codec);
-		free(hAVFmtContext->streams[i]);
-	}
-	*/
-
-	if(!(hAVFmtContext->oformat->flags & AVFMT_NOFILE)){
-		avio_close(hAVFmtContext->pb);
-	}
-
-	close_stream(hAVFmtContext, &sVOs);
-    close_stream(hAVFmtContext, &sAOs);
-
-	avformat_free_context(hAVFmtContext);
-	hAVFmtContext = NULL;
-
-	if(hRecordFile != NULL) free(hRecordFile);
-	hRecordFile = NULL;
-
-	if(hAudioRecCaches != NULL) free(hAudioRecCaches);
-	hAudioRecCaches = NULL;
-
-	PUT_LOCK(&AviDataLock);
+	PUT_LOCK(&CaptureLock);
 
 	return 0;
 }
-
-
 

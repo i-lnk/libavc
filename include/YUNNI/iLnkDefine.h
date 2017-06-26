@@ -163,6 +163,12 @@ typedef enum{
 #define CMD_DATACTRL_PLAYBACK_START		0x3012
 #define CMD_DATACTRL_PLAYBACK_STOP		0x3013
 
+#define CMD_DEV_RECORD_PLAYBACK_SEEK		0x3014
+#define CMD_DEV_RECORD_PLAYBACK_SPEED		0x3015
+
+
+
+
 #define CMD_DATACTRL_DOORBELL_CALL_ACCEPT	0x3020//呼叫接受
 #define CMD_DATACTRL_DOORBELL_CALL_REJECT	0x3021//呼叫拒绝
 
@@ -824,6 +830,7 @@ typedef enum PtzDirection{
 typedef struct tag_ptzCtrl{
 	int param;//对应参数见ptzParamType_e
 	int value;//值参考ptzCtrlValueXXXX_e
+	int step;
 }ptzParamSet_t;
 //oParam:NULL
 

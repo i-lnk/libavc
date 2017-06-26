@@ -3,7 +3,7 @@
 #ifndef _PPPP_CHANNEL_H_
 #define _PPPP_CHANNEL_H_
 
-#include "CircleBuf.h"
+#include "circlebuffer.h"
 
 #ifdef PLATFORM_ANDROID
 #include <jni.h>
@@ -26,11 +26,10 @@
 #include <libswscale/swscale.h>
 #include <libavutil/time.h>
 
-#include "ffmpeg_mp4.h"
+#include "muxing.h"
 
 #include "openxl_io.h"
 #include "audio_codec.h"
-#include "audiodatalist.h"
 
 #include "object_jni.h"
 #ifndef TUTK_PPPP
@@ -77,28 +76,13 @@
 #define PPPP_STATUS_EXCEED_SESSION 13		/* √ª”–ø…”√µƒª·ª∞ */
 
 #define COMMAND_BUFFER_SIZE 32*1024
-//TUTK VIDEO INFO
-typedef struct tag_AV_HEAD
-{
-    unsigned int   		startcode;	//  0xa815aa55
-    unsigned char		type;		//  0->264 idr frame 1->264 p frame
-    unsigned char  	    streamid;	
-    unsigned short  	militime;	//  diff time
-    unsigned int 		sectime;	//  diff time
-    unsigned int    	frameno;	//  frameno
-    unsigned int 		len;		//  data len
-    unsigned char		version;	// version
-    unsigned char		sessid;		//ssid
-    unsigned char		other[2];
-    unsigned char		other1[8];
-	char 				d[0];
-}AV_HEAD,*PAV_HEAD;
 
 //YUNNI VIDEO INFO
 #define AVF_STARTCODE 0xa815aa55
 #define MAX_FRAME_LENGTH 209715200 //200 * 1024 * 1024 ; 200KB
 #define MAX_AUDIO_DATA_LENGTH 2048
-typedef struct tag_AV_HEAD_YUNNI
+
+typedef struct _T_AV_HEAD
 {
     unsigned int   		startcode;	//  0xa815aa55
     
@@ -121,7 +105,7 @@ typedef struct tag_AV_HEAD_YUNNI
 	
     unsigned char		other1[4];
 	char 				d[0];
-}AV_HEAD_YUNNI,*PAV_HEAD_YUNNI;
+}AV_HEAD_YUNNI,*PAV_HEAD_YUNNI,AV_HEAD,*PAV_HEAD;
 
 typedef struct fileParam{
     unsigned char	type;		//  0->264 idr frame 1->264 p frame
@@ -170,7 +154,7 @@ public:
 		);
     virtual ~CPPPPChannel();
 
-    int  Start();
+    int  Start(char * usr,char * pwd,char * server);
 	void Close();
 	int StartMediaChannel();
     int StartVideoChannel();
@@ -181,10 +165,14 @@ public:
 	
 	int StartMediaStreams(
 		const char * url,
+		int audio_sample_rate,
+		int audio_channel,
 		int audio_recv_codec,
 		int audio_send_codec,
-		int video_recv_codec
-		);
+		int video_recv_codec,
+		int video_w_crop,
+		int video_h_crop
+	);
 	
 	int CloseMediaStreams();
 
@@ -196,27 +184,18 @@ public:
 	
     void MsgNotify(JNIEnv * hEnv,int MsgType, int Param);
 	
-#ifndef TUTK_PPPP
 	int StartFileRecvThread();
 	int SetSystemParams_yunni(int gwChannel,int cmdType,char *cmdContent,int cmdLen);
-	void p2p_ConnectProc(JNIEnv *env);
+	int p2p_ConnectProc(JNIEnv *env);
 	int ExtAckCmdHeaderBuild(exSendCmd_t *extCmdHead,unsigned char sessionHandle,short cmd,short len);
 	int ExtCmdHeaderBuild(exSendCmd_t *extCmdHead,unsigned char gwChannel,short cmd,short len); 
 	void ConnectUserCheckAcK(JNIEnv * env,char *pbuf,unsigned short len);
-	void ProcessCommand_EX(JNIEnv * env,int gwChannel,int cmd, char *pbuf, int len);
-	void ProcessCommand(JNIEnv * env,int gwChannel,int cmd, char *pbuf, int len);
-#endif
 	void AlarmNotifyDoorBell(JNIEnv * hEnv, char *did, char *type, char *time );
 
 	int  PPPPClose();
 
 public:
 	JNIEnv *            m_JNIMainEnv;	// Java env
-	
-	// 
-	CAudioDataList *	hAudioGetList;
-	CAudioDataList *	hAudioPutList;
-	
 	
 	COMMO_LOCK			SessionStatusLock;
 	int					SessionStatus;
@@ -252,11 +231,6 @@ public:
 	int 				iocmdRecving;	
 	int					iocmdSending;
 	int 				fileRecving;	//��ȡSD�����ݿ�����ʶ
-	
-	int					AudioRecvFormat;
-	int					VideoRecvFormat;
-	int					AudioSendFormat;
-	int					AudioEchoCancellationEnable;
 
 	pthread_t			mediaCoreThread;
 
@@ -268,56 +242,50 @@ public:
 
 	pthread_t 			audioRecvThread;
 	pthread_t 			audioSendThread;
+	pthread_t			recordingThread;
+
+	int					AudioSampleRate;	// audio samplerate
+	int					AudioChannel;		// audio channel mode
+	int					AudioRecvFormat;	// audio codec from device
+	int					AudioSendFormat;	// audio codec to device
+	int					VideoRecvFormat;	// video codec from device
+
+	int					Audio10msLength;	// audio data 10ms length
+	int					AudioSaveLength;	// audio aac codec length
+
+	int					AudioEchoCancellationEnable;
 
 	int					MW;				
 	int					MH;				// 
+	int					MWCropSize;
+	int					MHCropSize;
 	int					YUVSize;		//
+	int					FPS;			//
+	
+	unsigned	int 	PlayBackTime;	//�ط�ʱ��
 
+	CH264Decoder    *   hDec;
 	char 			* 	hVideoFrame;	//
+	unsigned int		FrameTimestamp; //		
 	
 	COMMO_LOCK			DisplayLock;	//
 	COMMO_LOCK			SndplayLock;	//
+	COMMO_LOCK			CaptureLock;	//
 
-	AVFormatContext * 	hAVFmtContext;
-	AVOutputFormat  * 	hAVFmtOutput;
-	AVStream		* 	hAudioStream;
-	AVStream		* 	hVideoStream;
-	AVCodecContext  * 	hAVCodecContext;
+	char 				recordingExit;			// 
 
-	OutputStream 		sVOs;
-	OutputStream 		sAOs;
-
-	char *				hAudioRecCaches;
-	int					aLen;			// 
-
-
-	long long		  	vCTS;			// µ±«∞ ±º‰¥¡
-	long long		  	vLTS;			// …œ¥Œ ±º‰¥¡
-	long long		 	vPTS;			// ø™ º ±º‰¥¡ - µ±«∞÷° ±º‰¥¡
-
-	long long			aCTS;			// µ±«∞ ±º‰¥¡
-	long long			aLTS;			// …œ¥Œ ±º‰¥¡
-	long long		 	aPTS;			// ø™ º ±º‰¥¡ - µ±«∞÷° ±º‰¥¡
-	
-	long long		  	sSTS;			// ø™ º ±º‰¥¡
-
-	long long			vIdx;			//  ”∆µÀ˜“˝
-	long long			aIdx;			// “Ù∆µÀ˜“˝
-
-	char			*	hRecordFile;
-
-	COMMO_LOCK			AviDataLock;
 	PROCESS_HANDLE		avProc;			// ¬ºœÒœﬂ≥Ãæ‰±˙
-	char 				avExit;			// ¬ºœÒœﬂ≥ÃÕÀ≥ˆ±Í÷æ
 
 	// for avi proc
-	CCircleBuf *		hVideoBuffer;	//  ”∆µª∫≥Â«¯
-	CCircleBuf *		hAudioBuffer;	// “Ù∆µ≤•∑≈ª∫≥Â«¯
-	CCircleBuf *		hSoundBuffer;	// “Ù∆µ¬º÷∆ª∫≥Â«¯
+	CCircleBuffer *		hVideoBuffer;	// 
+	CCircleBuffer *		hAudioBuffer;	// 
+	CCircleBuffer *		hSoundBuffer;	// 
 	
-	CCircleBuf *		hIOCmdBuffer;	// ÷∏¡Ó∑¢ÀÕª∫≥Â«¯
+	CCircleBuffer *		hIOCmdBuffer;	// 
+	CCircleBuffer *		hFilesBuffer;   //
 
-	CCircleBuf *		hFileBuffer;
+	CCircleBuffer *		hAudioGetList;
+	CCircleBuffer *		hAudioPutList;
 	
 	int StartRecorder(
 		int 			W,				// øÌ∂»
@@ -354,14 +322,6 @@ public:
 	int m_nNmb;
 	int m_n;
 	//CVDataList *m_pVideo_RecvBuf;
-	
-	pthread_mutex_t 	audioPlayThreadLock;
-	pthread_mutex_t 	audioSendThreadLock;
-	pthread_mutex_t 	audioRecvThreadLock;
-	pthread_mutex_t 	cmdRecvThreadLock;
-	pthread_mutex_t 	fileRecvThreadLock;
-	pthread_mutex_t 	DataWriteThreadLock;
-	pthread_mutex_t 	m_PPPPCloseMutex;
 
 	//��Ƶ����
 typedef enum tag_ENUM_VIDEO_MODE
@@ -382,24 +342,10 @@ typedef enum tag_ENUM_FRAME_TYPE
 
 	int 				m_bPlayback;
 	ENUM_VIDEO_MODE_YUNNI_P2P m_EnumVideoMode;
-	pthread_mutex_t 	videoRecvThreadLock;
-//	pthread_t			videoRecvThread;
-	int 				videoRecving;	//�߳�ѭ����ʶ
 
 
 	pthread_t 			fileRecvThread;
-	
-	pthread_mutex_t 	videoPlayThreadLock;//�߳���
-//	pthread_t 			videoPlayThread;//�߳̾��
-//	int 				videoPlaying;	//�߳�ѭ����ʶ
 	int					videoPlayEnabled;	//����
-
-	// for avi proc
-	//CCircleBuf *		hVideoBuffer;	// ��Ƶ������
-	//CCircleBuf *		hAudioBuffer;	// ��Ƶ���Ż�����
-	xqRingBuffer_t	*	avRecvRingBuffer; //����Ƶѭ������
-	xqRingBuffer_t	*	hAvSendRingBuffer;//ʹ�ù�������Ƶ���ͻ�����
-	CCircleBuf *		hSoundPlayCircleBuffer;	// ��Ƶ¼�ƻ�����
 	
 	typedef struct
 	{

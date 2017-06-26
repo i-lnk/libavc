@@ -252,7 +252,7 @@ int parseP2PSetting(JNIEnv *env,jobject cmdParam,openP2pSetting_t *p2pSetting){
 
 	return nRet;
 }
-/*
+
 int parseP2pNodeExt(JNIEnv *env,jobject devObj,P2pNodeExt_t_EX * devBase){
 	jclass devClass;
 	
@@ -312,7 +312,7 @@ int parseP2pNodeExt(JNIEnv *env,jobject devObj,P2pNodeExt_t_EX * devBase){
 
 	return 0;
 	}
-*/
+
 int parseOprPolicy(JNIEnv *env,jobject cmdParam,sysOprPolicy_t_EX *oprPolicy){
 	int nRet=0;
 	jclass cmdParamClass;
@@ -993,11 +993,15 @@ int parsePtzParam(JNIEnv *env,jobject cmdParam,ptzParamSet_t *ptzCtrl){
 	
 	jfieldID paramType=env->GetFieldID(cmdParamClass,"param","I");
 	jfieldID paramValue=env->GetFieldID(cmdParamClass,"value","I");
+	jfieldID paramStep=env->GetFieldID(cmdParamClass,"step","I");
+	
 	jint jparamType=env->GetIntField(cmdParam, paramType);
 	jint jparamValue=env->GetIntField(cmdParam, paramValue);
+	jint jparamStep=env->GetIntField(cmdParam, paramStep);
 
 	ptzCtrl->param=(int)jparamType;
 	ptzCtrl->value=(int)jparamValue;
+	ptzCtrl->step=(int)jparamStep;
 
 	return nRet;	
 	}
@@ -1047,6 +1051,7 @@ int parseFileInfo(JNIEnv *env,jobject cmdParam,fileTransParam_t *fileTransParam)
 		joffset=env->GetIntField((jobject)cmdParam, offset);
 
 		fileTransParam->offset=(int)joffset;
+		Log3("-------offset--------->[%d] \n",fileTransParam->offset);
 		if (NULL!=szfilename){
 			strncpy(fileTransParam->filename,szfilename,128);
 			Log2("get file:%s\n\r",szfilename);

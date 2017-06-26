@@ -2,13 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "utility.h"
 #include "audio_codec.h"
 #include "opus.h"
 #include "audio_codec_adpcm.h"
 #include "audio_codec_g711.h"
-
-
 
 //static const int audio_eb_size = 8192;
 
@@ -75,8 +72,7 @@ void * audio_enc_init(
 	int ret = 0;
 
 	OpusEncoder * hOpusEnc = NULL;
-	
-	
+
 	switch(codec){
 		case E_CODEC_AUDIO_G711A:
 			hCodec = (PT_AUDIO_CODEC)malloc(sizeof(T_AUDIO_CODEC));
@@ -86,6 +82,7 @@ void * audio_enc_init(
 			if(ret != OPUS_OK){
 				return NULL;
 			}
+
 			opus_encoder_ctl(hOpusEnc, OPUS_SET_BITRATE(12000));
 //			opus_encoder_ctl(hOpusEnc, OPUS_SET_BANDWIDTH(OPUS_BANDWIDTH_WIDEBAND));
 			opus_encoder_ctl(hOpusEnc, OPUS_SET_SIGNAL(OPUS_SIGNAL_VOICE)); 
@@ -163,11 +160,14 @@ int audio_enc_process(
 	PT_AUDIO_CODEC hCodec = (PT_AUDIO_CODEC)handle;
 
 	GET_LOCK(hCodec->plock);
+
 	if(hCodec == NULL){
 		PUT_LOCK(hCodec->plock);
 		return -1;
 	}
+	
 	int ret = -1;
+	
 	switch(hCodec->codec){
 		case E_CODEC_AUDIO_G711A:
 			ret = audio_enc_g711(handle,raw,raw_lens,out,out_lens);

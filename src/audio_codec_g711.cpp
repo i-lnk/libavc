@@ -1,5 +1,4 @@
 #include "audio_codec_g711.h"
-#include "utility.h"
 
 static unsigned char alaw_encode(short pcm16)
 {
