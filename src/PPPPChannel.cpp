@@ -520,7 +520,7 @@ static void * FilesRecvProcess(
 	hEnv->DeleteLocalRef(jbyteArray_yuv);
 	hEnv->DeleteLocalRef(jstring_did);
 
-	Log3("files recv proc exit");
+	Log3("[X:%s]=====>files recv proc exit",hPC->szDID);
 #ifdef PLATFORM_ANDROID
     if(isAttached) 
         g_JavaVM->DetachCurrentThread(); 
@@ -592,7 +592,7 @@ void * IOCmdSendProcess(
 		usleep(1000);
 	}
 
-	Log3("[X:%s]=====>IOCmdSendProcess Exit.",hPC->szDID);
+	Log3("[X:%s]=====>iocmd send proc exit.",hPC->szDID);
 
 	return NULL;
 }
@@ -807,7 +807,7 @@ static void * VideoPlayProcess(
     jbyteArray_yuv = NULL;
     jstring_did = NULL;
 #endif
-	Log3("video play proc exit.");
+	Log3("[X:%s]=====>video play proc exit.",hPC->szDID);
 
 	return NULL;
 }
@@ -958,7 +958,7 @@ static void * VideoRecvProcess(
 	
 	PUT_LOCK(&hPC->DisplayLock);
 
-	Log3("video recv proc exit.");
+	Log3("[X:%s]=====>video recv proc exit.",hPC->szDID);
 	
 	return NULL;
 }
@@ -987,6 +987,11 @@ static void * AudioRecvProcess(
 	void * hCodec = NULL;
 
 jump_rst:
+
+	Log3("audio format info:[sr = %d] [ch = %d] [length = %d]",
+		hPC->AudioSampleRate,
+		hPC->AudioChannel,
+		hPC->Audio10msLength);
 	
 	hCodec = audio_dec_init(
 		hPC->AudioRecvFormat,
@@ -1025,8 +1030,6 @@ jump_rst:
 		goto jumperr;
 	}
 #endif
-	
-	Log3("AudioRecvProcess  come to read buff ----------> ");
 
 	while(hPC->audioPlaying){
 
@@ -1061,7 +1064,7 @@ jump_rst:
 			break;
 		}
 		
-		if( (hPC->audioEnabled != 1)){
+		if(hPC->audioEnabled != 1){
 			usleep(1000); continue;
 		}
 
@@ -1112,8 +1115,6 @@ jump_rst:
             continue;
         }
 
-//		Log3("audio recive with length:[%d].",CodecLength);
-
 		CodecLengthNeed = CodecLength - (CodecLength % hPC->Audio10msLength);
 		int Round = CodecLengthNeed/hPC->Audio10msLength;
         
@@ -1138,7 +1139,7 @@ jumperr:
 
 	audio_dec_free(hCodec);
 
-	Log3("audio recv proc exit.");
+	Log3("[X:%s]=====>audio recv proc exit.",hPC->szDID);
 
 	return NULL;
 }
@@ -1233,6 +1234,11 @@ static void * AudioSendProcess(
 			usleep(10); 
 			continue;
 		}
+
+		if(hPC->mediaEnabled != 1){
+			usleep(10);
+			continue;
+		}
 		
 #ifdef ENABLE_AEC
 		if (audio_echo_cancellation_farend(hAEC,(char*)speakerData,hPC->Audio10msLength/sizeof(short)) != 0){
@@ -1304,7 +1310,7 @@ static void * AudioSendProcess(
 			Log3("PPPP_IndeedWrite ----------->Failed\n");
 			break;
 		}else if (ret != nBytesPost){
-			Log3("PPPP_IndeedWrite ----------->unfinished[ret=%d,want=%d]\n",ret,nBytesPost);
+			Log3("PPPP_IndeedWrite ----------->Lost Bytes[ret=%d,want=%d]\n",ret,nBytesPost);
 		}
 
 //		Log3("audio send data with codec:[%02X] length:[%04d] bytes.",hAV->audiocodec,nBytesPost);
@@ -1336,7 +1342,7 @@ static void * AudioSendProcess(
 	hPC->hAudioPutList = NULL;
 	hPC->hAudioGetList = NULL;
 		
-	Log3("AudioSendProcess exit.\n");
+	Log3("[X:%s]=====>audio send proc exit.\n",hPC->szDID);
 
 	return NULL;
 	
@@ -1470,7 +1476,7 @@ void * RecordingProcess(void * Ptr){
 	free(pAFrm); pAFrm = NULL;
 	free(pVFrm); pVFrm = NULL;
 
-	Log3("stop recording process done.");
+	Log3("[X:%s]=====>recording proc exit.",hPC->szDID);
 	
 	return NULL;
 }
@@ -1577,7 +1583,7 @@ connect:
 		Log3("create video play process failed.");
 		goto jumperr;
 	}
-	
+
 	ret = pthread_create(&hPC->audioRecvThread,NULL,AudioRecvProcess,hVoid);
 	if(ret != 0){
 		Log3("create video play process failed.");
@@ -1596,7 +1602,7 @@ connect:
 			break;
 		}
 
-		Log3("PPPP_Check:[%s] result:[%d].",SInfo.DID,ret);
+//		Log3("PPPP_Check:[%s] result:[%d].",SInfo.DID,ret);
 		
 		sleep(3);
 	}
@@ -1618,7 +1624,10 @@ jumperr:
 	PUT_LOCK(&hPC->DestoryLock);
 	PUT_LOCK(&hPC->SessionLock);
 
-	Log3("media core process:[%d] exit ..............",gettid());
+	Log3("[X:%s]=====>media core process:[%d] exit ..............",
+		hPC->szDID,
+		gettid()
+		);
 
 	return NULL;	
 }
@@ -1673,7 +1682,11 @@ CPPPPChannel::CPPPPChannel(
     SID = -1;
 
 	AudioSaveLength = 0;
-	Audio10msLength = 0;
+
+	AudioRecvFormat = E_CODEC_AUDIO_G711A; 
+	AudioSampleRate = 8000,
+	AudioChannel = 1;
+	Audio10msLength = AudioSampleRate * AudioChannel * 2 / 100;
 
 	MW = 1920;
 	MH = 1080;
@@ -2109,9 +2122,6 @@ int CPPPPChannel::StartMediaStreams(
 
 	Log3("media stream start here.");
 
-	mediaEnabled = 1;
-	audioSending = 1;
-
 	// pppp://usr:pwd@livingstream:[channel id]
 	// pppp://usr:pwd@replay/mnt/sdcard/replay/file
 	
@@ -2132,17 +2142,15 @@ int CPPPPChannel::StartMediaStreams(
 	MHCropSize = video_h_crop;
 	MWCropSize = video_w_crop;
 
-	Log3(
-		"audio format info:[\n"
-		"samplerate = %d\n"
-		"channel = %d\n"
-		"length in 10 ms is %d\n"
-		"]\n",
-		AudioSampleRate,AudioChannel,Audio10msLength);
-
 	if(url != NULL){
 		memcpy(szURL,url,strlen(url));
 	}
+
+	hSoundBuffer->Clear();
+	hAudioBuffer->Clear();
+
+	audioSending = 1;
+	mediaEnabled = 1;
 
 	pthread_create(&audioSendThread,NULL,AudioSendProcess,(void*)this);
 

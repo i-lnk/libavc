@@ -50,17 +50,17 @@ static SLresult openSLCreateEngine(OPENXL_STREAM *p)
 	SLresult result;
 	// create engine
 
-	Log3("opensl step 1.");
+//	Log3("opensl step 1.");
 	result = slCreateEngine(&(p->engineObject), 0, EngineOption, 0, NULL, NULL);
 	if(result != SL_RESULT_SUCCESS) goto engine_end;
 
 	// realize the engine 
-	Log3("opensl step 2.");
+//	Log3("opensl step 2.");
 	result = (*p->engineObject)->Realize(p->engineObject, SL_BOOLEAN_FALSE);
 	if(result != SL_RESULT_SUCCESS) goto engine_end;
 
 	// get the engine interface, which is needed in order to create other objects
-	Log3("opensl step 3.");
+//	Log3("opensl step 3.");
 	result = (*p->engineObject)->GetInterface(p->engineObject, SL_IID_ENGINE, &(p->engineEngine));
 	if(result != SL_RESULT_SUCCESS) goto engine_end;
 

@@ -156,10 +156,6 @@ public:
 
     int  Start(char * usr,char * pwd,char * server);
 	void Close();
-	int StartMediaChannel();
-    int StartAlarmChannel();
-    int StartIOCmdChannel();
-	int StartIOSesChannel();
 	
 	int StartMediaStreams(
 		const char * url,
@@ -171,6 +167,8 @@ public:
 		int video_w_crop,
 		int video_h_crop
 	);
+
+	int IOCmdSend(int gwChannel,int cmdType,char *cmdContent,int cmdLen);
 	
 	int CloseMediaStreams();
 
@@ -178,14 +176,12 @@ public:
 	
 	int SendAVAPIStartIOCtrl();
 	int SendAVAPICloseIOCtrl();
-	int SetSystemParams(int type, char *msg, int len);
 	
     void MsgNotify(JNIEnv * hEnv,int MsgType, int Param);
 	
-	int StartFileRecvThread();
-	int SetSystemParams_yunni(int gwChannel,int cmdType,char *cmdContent,int cmdLen);
-	int p2p_ConnectProc(JNIEnv *env);
-	int ExtAckCmdHeaderBuild(exSendCmd_t *extCmdHead,unsigned char sessionHandle,short cmd,short len);
+	int SetSystemParams(int, char*, int);
+	
+	int Connect(JNIEnv *env);
 	int ExtCmdHeaderBuild(exSendCmd_t *extCmdHead,unsigned char gwChannel,short cmd,short len); 
 	void ConnectUserCheckAcK(JNIEnv * env,char *pbuf,unsigned short len);
 	void AlarmNotifyDoorBell(JNIEnv * hEnv, char *did, char *type, char *time );
@@ -194,12 +190,8 @@ public:
 
 public:
 	JNIEnv *            m_JNIMainEnv;	// Java env
-	
-	COMMO_LOCK			SessionStatusLock;
-	int					SessionStatus;
 
 	char 				szURL[256];		//
-
 	char 				szTicket[4];//用户验证票据
 
 	char 				szDID[64];		//
@@ -228,7 +220,7 @@ public:
 	int					audioSending;
 	int 				iocmdRecving;	
 	int					iocmdSending;
-	int 				fileRecving;	//获取SD卡数据开启标识
+	int 				filesRecving;	//获取SD卡数据开启标识
 
 	pthread_t			mediaCoreThread;
 
@@ -240,6 +232,9 @@ public:
 
 	pthread_t 			audioRecvThread;
 	pthread_t 			audioSendThread;
+
+	pthread_t 			filesRecvThread;
+	
 	pthread_t			recordingThread;
 
 	int					AudioSampleRate;	// audio samplerate
@@ -269,6 +264,9 @@ public:
 	COMMO_LOCK			DisplayLock;	//
 	COMMO_LOCK			SndplayLock;	//
 	COMMO_LOCK			CaptureLock;	//
+	COMMO_LOCK			SessionLock;	//
+	COMMO_LOCK			PlayingLock;	//
+	COMMO_LOCK			DestoryLock;	//
 
 	char 				recordingExit;			// 
 
@@ -336,14 +334,6 @@ typedef enum tag_ENUM_FRAME_TYPE
 	ENUM_FRAME_TYPE_MJPEG = 3,
 	ENUM_FRAME_TYPE_AUDIO = 6
 }ENUM_FRAME_TYPE;
-	
-
-	int 				m_bPlayback;
-	ENUM_VIDEO_MODE_YUNNI_P2P m_EnumVideoMode;
-
-
-	pthread_t 			fileRecvThread;
-	int					videoPlayEnabled;	//播放
 	
 	typedef struct
 	{
