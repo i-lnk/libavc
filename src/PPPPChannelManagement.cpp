@@ -15,6 +15,8 @@
 
 #include "PPPPChannelManagement.h"
 
+static COMMO_LOCK PPPPChannelLock = PTHREAD_MUTEX_INITIALIZER;
+
 CPPPPChannelManagement::CPPPPChannelManagement()
 {
 	unsigned int iotcVer;
@@ -63,12 +65,6 @@ int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *serv
 {
 	if(szDID == NULL) return 0;
 	
-    //F_LOG
-
-	Log3("start get fucking channel lock:[%p]",&PPPPChannelLock);
-	Log3("start get fucking channel lock:[%p]",&PPPPChannelLock);
-	Log3("start get fucking channel lock:[%p]",&PPPPChannelLock);
-	
 	GET_LOCK( &PPPPChannelLock );
 
 	int r = 1;
@@ -76,7 +72,7 @@ int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *serv
 
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+        if(strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
         {
            	r = m_PPPPChannel[i].pPPPPChannel->Start(user, pwd, server);
             goto jumpout;
@@ -100,7 +96,6 @@ int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *serv
 
 jumpout:
 
-	Log3("start put channel lock");
 	PUT_LOCK( &PPPPChannelLock );
     
     return r;
@@ -211,7 +206,7 @@ int CPPPPChannelManagement::ClosePPPPLivestream(char * szDID){
 
    	int ret  = -1;
 
-	Log3("close live stream get channel lock");
+//	Log3("close live stream get channel lock");
 
 	GET_LOCK( &PPPPChannelLock );
 
@@ -226,7 +221,7 @@ int CPPPPChannelManagement::ClosePPPPLivestream(char * szDID){
         }
     }  
 
-	Log3("close live stream put channel lock");
+//	Log3("close live stream put channel lock");
 
 	PUT_LOCK( &PPPPChannelLock );
     
@@ -375,8 +370,6 @@ int CPPPPChannelManagement::PPPPSetSystemParams(char * szDID,int type,char * msg
 		return 0;
 	}
 
-	Log3("PPPPSetSystemParams get channel lock");
-
 	GET_LOCK( &PPPPChannelLock );
 
 	int r = 0;
@@ -402,7 +395,6 @@ int CPPPPChannelManagement::PPPPSetSystemParams(char * szDID,int type,char * msg
 
 jumpout:
 
-	Log3("PPPPSetSystemParams put command lock");
 	PUT_LOCK( &PPPPChannelLock );
     
     return r;
@@ -420,10 +412,6 @@ int CPPPPChannelManagement::CmdExcute(
 		Log3("Invalid szDID for application layer caller");
 		return 0;
 	}
-
-	Log3("cmdType=%04x\n",cmdType);
-
-	Log3("CmdExcute get channel lock");
 	
 	GET_LOCK( &PPPPChannelLock );
 
@@ -438,7 +426,7 @@ int CPPPPChannelManagement::CmdExcute(
 		
         if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0){
 
-			int ret = m_PPPPChannel[i].pPPPPChannel->SetSystemParams_yunni(gwChannel,cmdType,cmdContent,cmdLen);
+			int ret = m_PPPPChannel[i].pPPPPChannel->IOCmdSend(gwChannel,cmdType,cmdContent,cmdLen);
 
          	if(1 == ret){
             	r = 1; goto jumpout;
@@ -450,7 +438,6 @@ int CPPPPChannelManagement::CmdExcute(
 		
 jumpout:
 
-	Log3("CmdExcute put channel lock");
 	PUT_LOCK( &PPPPChannelLock );
 	
     return r;

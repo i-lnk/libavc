@@ -157,8 +157,6 @@ public:
     int  Start(char * usr,char * pwd,char * server);
 	void Close();
 	int StartMediaChannel();
-    int StartVideoChannel();
-	int StartAudioChannel();
     int StartAlarmChannel();
     int StartIOCmdChannel();
 	int StartIOSesChannel();

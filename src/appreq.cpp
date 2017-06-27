@@ -114,8 +114,7 @@ char * GetCgiParam(
 	int DataLens = Base64Decode(lpBegin,To,CopyLens,ToBufferSize);
 	if(DataLens < 0) return NULL;
 
-	Log3("GetCgiParam .....[%s%s]",Begin,To);
-	
+//	Log3("GetCgiParam .....[%s%s]",Begin,To);
 //	memcpy(To,lpBegin,CopyLens);
 
 	return To;
@@ -132,7 +131,7 @@ char * ResolveData(
 	
     strncat(To,beginbuf,endbuf-beginbuf);
 
-	Log3("GetCgiParam .....[%s%s]",Begin,To);
+//	Log3("GetCgiParam .....[%s%s]",Begin,To);
 
 	return To;
 }
@@ -154,11 +153,11 @@ int Userlogin(
 	ResolveData(username,Cgi,"name=","&");
 	ResolveData(userpass,Cgi,"password=","&");
 
-	Log3("userlogin.name =%s , userlogin.pass = %s",username,userpass);
+//	Log3("userlogin.name =%s , userlogin.pass = %s",username,userpass);
 	
 	strncpy(userlogin.name,username,sizeof(username));
 	strncpy(userlogin.pass,userpass,sizeof(userpass));
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&userlogin,sizeof(user_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&userlogin,sizeof(user_t));
 }
 int UserSet(
 	int				sessionid,
@@ -192,7 +191,7 @@ int UserSet(
 	strncpy(userSet.user3,user3,sizeof(user3));
 	strncpy(userSet.pwd3,pwd3,sizeof(pwd3));
 
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&userSet,sizeof(userSetting_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&userSet,sizeof(userSetting_t));
 	
 }
 int UserGet(
@@ -202,7 +201,7 @@ int UserGet(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int AudioStart(
@@ -212,7 +211,7 @@ int AudioStart(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int AudioStop(
@@ -222,7 +221,7 @@ int AudioStop(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int TalkStart(
@@ -232,7 +231,7 @@ int TalkStart(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 int TalkStop(
 	int 			sessionid,
@@ -241,7 +240,7 @@ int TalkStop(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int VideoStart(
@@ -251,7 +250,7 @@ int VideoStart(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 int VideoStop(
 	int				sessionid,
@@ -260,7 +259,7 @@ int VideoStop(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int VideoPlayBackStart(
@@ -280,7 +279,7 @@ int VideoPlayBackStart(
 
 	fileParam.offset = atoi(offset);
 
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&fileParam,sizeof(fileTransParam_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&fileParam,sizeof(fileTransParam_t));
 	
 }
 
@@ -291,7 +290,7 @@ int VideoPlayBackStop(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int CameraSet(
@@ -369,7 +368,7 @@ int CameraSet(
 	}		
 
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&cameraCtrl,sizeof(camCtrl_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&cameraCtrl,sizeof(camCtrl_t));
 }
 
 int CameraGet(
@@ -379,7 +378,7 @@ int CameraGet(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int CameraReboot(
@@ -389,7 +388,7 @@ int CameraReboot(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int CameraShouDown(
@@ -399,7 +398,7 @@ int CameraShouDown(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int OprpolitySet(
@@ -473,7 +472,7 @@ int OprpolitySet(
 	Oprpolity.powerMgrCountDown = atoi(powerMgrCountDown);
 	Oprpolity.powerMgrSchedule = atoi(powerMgrSchedule);
 
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&Oprpolity,sizeof(sysOprPolicy_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&Oprpolity,sizeof(sysOprPolicy_t));
 }
 
 int OprpolityGet(
@@ -483,7 +482,7 @@ int OprpolityGet(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 
@@ -498,7 +497,7 @@ int Item_Recover(
 	char Recover[4] = {0};
 	GetCgiParam(Recover,Cgi,sizeof(Recover),"item_type","&");
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,Recover,sizeof(Recover));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,Recover,sizeof(Recover));
 }
 
 int GpioValueSet(
@@ -521,7 +520,7 @@ int GpioValueSet(
 	gpioSet.gpioSelect = atoi(gpioSelect);
 	gpioSet.gpioValue= atoi(gpioValue);
 
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&gpioSet,sizeof(gpio_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&gpioSet,sizeof(gpio_t));
 }
 
 int GpioValueGet(
@@ -532,7 +531,7 @@ int GpioValueGet(
 ){
 
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 	
 }
 
@@ -544,7 +543,7 @@ int SDInfoGet(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int SDForMat(
@@ -554,7 +553,7 @@ int SDForMat(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int SDRecordSet(
@@ -616,7 +615,7 @@ int SDRecordSet(
 	AVRecPolicy.recConf = mRfsRecConfig;
 	AVRecPolicy.storagePolicy = mRfsStoragePolicy;
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&AVRecPolicy,sizeof(mRfsStoragePolicy_t)+sizeof(mRfsRecConfig_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&AVRecPolicy,sizeof(mRfsStoragePolicy_t)+sizeof(mRfsRecConfig_t));
 }
 
 int SDRecordGet(
@@ -626,7 +625,7 @@ int SDRecordGet(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int WIFIListGet(
@@ -636,7 +635,7 @@ int WIFIListGet(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int WIFIInfoGet(
@@ -646,7 +645,7 @@ int WIFIInfoGet(
 	void *			lpParams
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 
 int WIFIInfoSet(
@@ -687,7 +686,7 @@ int WIFIInfoSet(
 	GetCgiParam(wifiSet.dns1,Cgi,sizeof(wifiSet.dns1),"dns1=","&");
 	GetCgiParam(wifiSet.dns2,Cgi,sizeof(wifiSet.dns2),"dns2=","&");
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&wifiSet,sizeof(wifiParam_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&wifiSet,sizeof(wifiParam_t));
 }
 
 //ÔÆÌ¨¿ØÖÆ
@@ -714,7 +713,7 @@ int PTZCtrlSet(
 	cameraCtrl.param= atoi(Param);
 	cameraCtrl.value= atoi(Value);
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 }
 */
 int DateTimeSet(
@@ -746,7 +745,7 @@ int DateTimeSet(
 	DatetimeParamSet.xia_ling_shi_flag_status= atoi(xia_ling_shi_flag_status);
 	strncpy(DatetimeParamSet.ntp_svr,ntp_svr,64);
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&DatetimeParamSet,sizeof(datetimeParam_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&DatetimeParamSet,sizeof(datetimeParam_t));
 	
 }
 int DateTimeGet(
@@ -757,7 +756,7 @@ int DateTimeGet(
 ){
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 
 }
 
@@ -802,7 +801,7 @@ int ThirdPushSet(
 	ThirdPushParam.type = atoi(type);
 	ThirdPushParam.access_id = atoi(access_id);
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&ThirdPushParam,sizeof(thirdPushParam_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&ThirdPushParam,sizeof(thirdPushParam_t));
 
 }
 
@@ -814,7 +813,7 @@ int ThirdPushGet(
 ){
 
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,NULL,0);
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,NULL,0);
 
 }
 
@@ -829,7 +828,7 @@ int ThirdPushDel(
 	char device_token[128] = {0};
 	GetCgiParam(device_token,Cgi,sizeof(device_token),"device_token=","&");
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,device_token,sizeof(device_token));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,device_token,sizeof(device_token));
 
 }
 
@@ -867,7 +866,7 @@ int LogInfoGet(
 	logSearch.endTime    = atoi(endTime);
 	
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&logSearch,sizeof(logSearchCondition_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&logSearch,sizeof(logSearchCondition_t));
 
 }
 
@@ -902,8 +901,8 @@ int LogInfoSet(
 	logSet.bShutdwonLog = atoi(bShutdwonLog);
 	logSet.bTimerLog = atoi(bTimerLog);
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&logSet,sizeof(logSet_t));
-
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&logSet,sizeof(logSet_t));
+	
 }
 
 int FileDataGet(
@@ -914,7 +913,7 @@ int FileDataGet(
 ){
 
 	char * Cgi = (char *)szCgi;
-	Log3("File DownLoad Cgi ==================>%s",Cgi);
+//	Log3("File DownLoad Cgi ==================>%s",Cgi);
 	CPPPPChannel * hPC=(CPPPPChannel *)lpParams;
 	fileTransParam_t fileList;
 	memset(&fileList,0,sizeof(fileTransParam_t));
@@ -938,7 +937,7 @@ int FileDataGet(
 	GetCgiParam(offset,Cgi,sizeof(offset),"offset=","&");
 	fileList.offset = atoi(offset);
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&fileList,sizeof(fileTransParam_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&fileList,sizeof(fileTransParam_t));
 	
 }
 
@@ -960,7 +959,7 @@ int FileListGet(
 	
 	fileList.offset = atoi(offset);
 	
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&fileList,sizeof(fileTransParam_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&fileList,sizeof(fileTransParam_t));
 
 }
 
@@ -985,7 +984,7 @@ int VideoRecListGet(
 	videoRecSearch.starttime = atoi(starttime);
 	videoRecSearch.endtime	 = atoi(endtime);
 		
-	return hPC->SetSystemParams_yunni(Define_gwChannel,avMsgType,(char *)&videoRecSearch,sizeof(recFileSearchParam_t));
+	return hPC->IOCmdSend(Define_gwChannel,avMsgType,(char *)&videoRecSearch,sizeof(recFileSearchParam_t));
 
 }
 

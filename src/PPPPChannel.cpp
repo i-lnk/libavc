@@ -32,7 +32,7 @@
 #define ENABLE_AGC
 #define ENABLE_NSX_I
 #define ENABLE_NSX_O
-//#define ENABLE_VAD
+#define ENABLE_VAD
 
 #ifdef PLATFORM_ANDROID
 #endif
@@ -349,7 +349,8 @@ int PPPP_IndeedRead(
 	int sessionHandle,
 	unsigned char channel, 
 	char * buf, 
-	int len
+	int len,
+	int * breakFlag
 	){
 	char *p = buf;	  
 	int readSize ;
@@ -359,7 +360,6 @@ int PPPP_IndeedRead(
 	do
 	{
 		readSize = (remainSize>MAX_P2P_RECV_SIZE)?MAX_P2P_RECV_SIZE:remainSize;
-
 		
 		res = PPPP_Read(sessionHandle, channel, p, &readSize, 100);  
 		
@@ -367,11 +367,16 @@ int PPPP_IndeedRead(
 			remainSize -= readSize;
 			p += readSize;
 			usleep(100000);
+
+			if(*breakFlag == 0){
+				Log3("PPPP_IndeedRead break by flag");
+				break;
+			}
+			
 			continue;
 		}
 		
 		if(res < 0){
-			Log3("PPPP_Read error : %d", res);
 			return res;
 		}
 
@@ -383,7 +388,7 @@ int PPPP_IndeedRead(
 }
 
 //获取SD卡文件数据线程,注:功能已实现，但是存在问题!!
-static void *FileRecvProcess(
+static void * FilesRecvProcess(
 	void * hVoid
 ){
     CPPPPChannel * hPC= (CPPPPChannel *)hVoid;
@@ -419,7 +424,7 @@ static void *FileRecvProcess(
 	jbyteArray jbyteArray_yuv = hEnv->NewByteArray(hPC->YUVSize);
 	jbyte *	   jbyte_yuv = (jbyte *)(hEnv->GetByteArrayElements(jbyteArray_yuv,0));
 	
-    while(hPC->fileRecving){
+    while(hPC->filesRecving){
 		usleep(10000);
         //read head
         memset(&dataHead,0,sizeof(FILE_DATA_HEAD));
@@ -435,7 +440,7 @@ static void *FileRecvProcess(
 			continue;
 		}
 		
-		nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_FILE, (char *)&dataHead, dHeadLen);
+		nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_FILE, (char *)&dataHead, dHeadLen,&hPC->filesRecving);
 		if(nRet < 0){
 			Log3("FileRecv PPPP_IndeedRead failed  return: %d", nRet);
 			status=nRet;
@@ -465,7 +470,7 @@ static void *FileRecvProcess(
 
 		memset(pbuf,0x00,sizeof(pbuf));
 		if (dataHead.type==0){//文件属性
-			nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_FILE, (char*)pbuf, dataHead.len);
+			nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_FILE, (char*)pbuf, dataHead.len,&hPC->filesRecving);
 			if(nRet < 0){
 				Log3("FileRecv-attr PPPP_IndeedRead error: %d", nRet);
 				status=nRet;
@@ -498,7 +503,7 @@ static void *FileRecvProcess(
 			}
 		}
 		else{
-			nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_FILE, (char *)pbuf,dataHead.len);
+			nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_FILE, (char *)pbuf,dataHead.len,&hPC->filesRecving);
 			if(nRet < 0){
 				Log3("FileRecv-content PPPP_IndeedRead error: %d", nRet);
 				status=nRet;
@@ -515,7 +520,7 @@ static void *FileRecvProcess(
 	hEnv->DeleteLocalRef(jbyteArray_yuv);
 	hEnv->DeleteLocalRef(jstring_did);
 
-	Log3("p2pChannel_File_RecvProc quit ...");
+	Log3("files recv proc exit");
 #ifdef PLATFORM_ANDROID
     if(isAttached) 
         g_JavaVM->DetachCurrentThread(); 
@@ -524,127 +529,6 @@ static void *FileRecvProcess(
     return NULL;
 }
 
-void * MeidaCoreProcess(
-	void * hVoid
-){
-	
-	SET_THREAD_NAME("MeidaCoreProcess");
-	
-	Log3("current thread id is:[%d].",gettid());
-
-	CPPPPChannel * hPC = (CPPPPChannel*)hVoid;
-
-	JNIEnv * hEnv = NULL;
-#ifdef PLATFORM_ANDROID
-    char isAttached = 0;
-
-	int status = g_JavaVM->GetEnv((void **) &(hEnv), JNI_VERSION_1_4); 
-	if(status < 0){ 
-		status = g_JavaVM->AttachCurrentThread(&(hEnv), NULL); 
-		if(status < 0){
-			Log3("iocmd send process AttachCurrentThread Failed!!");
-			return NULL;
-		}
-		isAttached = 1;  
-	}
-#endif
-
-	int resend = 0;
-	int wakeup_times = 20;
-	int retry = 5;
-
-	int ret = 0;
-	int connection_status = PPPP_STATUS_DISCONNECTED;
-connect:
-    hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
-    
-	hPC->speakerChannel = -1;
-	hPC->avstremChannel =  0;
-	
-	Log3("[1:%s]=====>start get free session id for client connection.",
-         hPC->szDID);
-	//yunni p2p
-	Log3("p2p_ConnectProc Begin----------------\n");
-	ret = hPC->p2p_ConnectProc(hEnv);
-    switch(ret){
-		case 0:
-			break;
-		case -1:
-			connection_status = PPPP_STATUS_DISCONNECTED;
-			goto jumperr;
-		case -2:
-			connection_status = PPPP_STATUS_USER_NOT_LOGIN;
-			goto jumperr;
-		default:
-			goto jumperr;
-	}
-
-	Log3("[2:%s]=====>channel init command proc here.",hPC->szDID);
-	hPC->StartIOCmdChannel();
-	
-	Log3("[3:%s]=====>channel init fileRecv proc done.",hPC->szDID);
-	hPC->StartFileRecvThread();
-	
-	GET_LOCK(&hPC->SessionStatusLock);
-	hPC->SessionStatus = STATUS_SESSION_IDLE;
-	Log3("SESSION STATUS:IDLE");
-	PUT_LOCK(&hPC->SessionStatusLock);
-	
-	while(hPC->mediaLinking){
-		//Check User Status
-		st_PPPP_Session1 SInfo;
-		memset(&SInfo,0x00,sizeof(st_PPPP_Session1));
-		ret = PPPP_Check(hPC->sessionID,&SInfo);
-		
-		if(ret < 0){
-		//	Log3("P2P Connect Status ------------------------>%d ",ret);
-			hPC->MsgNotify(hEnv,MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_DEVICE_OFFLINE);
-			Log3("[7:%s]=====>stop old media process start.\n",hPC->szDID);
-			
-    	   	if(!hPC->CloseWholeThreads()){
-				Log3("MediaCoreProcess hPC->PPPPClose().........1");
-				hPC->PPPPClose();
-			}
-			Log3("[7:%s]=====>stop old media process close.\n",hPC->szDID);
-			
-			if(ret = ERROR_PPPP_INVALID_SESSION_HANDLE){
-				if(retry > 0){
-					retry--;
-					usleep(100000);
-					goto connect;
-				}
-			}
-			break;
-		}
-		sleep(1);
-	}
-
-jumperr:
-
-    if(!hPC->CloseWholeThreads()){   // make sure other service thread all exit.
-    	Log3("MediaCoreProcess hPC->PPPPClose()........2");
-		hPC->PPPPClose();
-	} 	
-
-	Log3("Get Session status lock");
-
-	GET_LOCK(&hPC->SessionStatusLock);
-	hPC->SessionStatus = STATUS_SESSION_DIED;
-	Log3("SESSION STATUS:DIED");
-	PUT_LOCK(&hPC->SessionStatusLock);
-
-	Log3("UILayer status set start");
-	hPC->MsgNotify(hEnv,MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
-	Log3("UILayer status set done");
-
-#ifdef PLATFORM_ANDROID
-	if(isAttached) g_JavaVM->DetachCurrentThread();
-#endif
-
-	Log3("MeidaCoreProcess Stop ..............");
-
-	return NULL;	
-}
 
 void * IOCmdSendProcess(
 	void * hVoid
@@ -740,13 +624,11 @@ void * IOCmdRecvProcess(
 
 	hPC->m_JNIMainEnv = hEnv;
 	unsigned int ReadSize=0;
-	char Params[128*1024] = {0};
 
 	unsigned int IOCtrlType = 0;
-	CMD_CHANNEL_HEAD * hCCH = (CMD_CHANNEL_HEAD*)Params;
+	CMD_CHANNEL_HEAD * hCCH = (CMD_CHANNEL_HEAD*)malloc(1024);
 	int avIdx = hPC->avIdx;
 
-	jbyteArray jbyteArray_cmd = hEnv->NewByteArray(sizeof(Params));
 	jstring jstring_did = hEnv->NewStringUTF(hPC->szDID);
 	
 	while(hPC->iocmdRecving){
@@ -762,7 +644,7 @@ void * IOCmdRecvProcess(
 			usleep(100000);
 			continue;
 		}
-		ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_CMMND,Params,sizeof(CMD_CHANNEL_HEAD));
+		ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_CMMND,(char*)hCCH,sizeof(CMD_CHANNEL_HEAD),&hPC->iocmdRecving);
 		if(ret < 0){
 			Log3("error!!!! PPPP_IndeedRead=%d",ret);
             break ;
@@ -778,9 +660,16 @@ void * IOCmdRecvProcess(
         if(hCCH->len == 0){
             continue;
         }
+
+		if(hCCH->len > 1024 - sizeof(CMD_CHANNEL_HEAD)){
+			char * bigmem = (char*)malloc(hCCH->len + sizeof(CMD_CHANNEL_HEAD));
+			memcpy(bigmem,hCCH,sizeof(CMD_CHANNEL_HEAD));
+			free(hCCH);
+			hCCH = (CMD_CHANNEL_HEAD*)bigmem;
+		}
 		
         //read data
-        ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_CMMND,hCCH->d,hCCH->len);
+        ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_CMMND,hCCH->d,hCCH->len,&hPC->iocmdRecving);
         if(ret < 0){
 			Log3("error, PPPP_IndeedRead=%d",ret);
             break;
@@ -789,7 +678,6 @@ void * IOCmdRecvProcess(
 		//
 		// here we process command for yunni p2p
 		// ...
-		Log3("ProcessCommand: hand instructions from Camera [%04x] ! \n",hCCH->cmd);
 
 		if(hCCH->cmd == CMD_SYSTEM_USER_CHK){
 			hPC->ConnectUserCheckAcK(hEnv,hCCH->d,hCCH->len);
@@ -800,6 +688,8 @@ void * IOCmdRecvProcess(
 		GET_LOCK(&g_CallbackContextLock);
 		
 	    if(g_CallBack_Handle != NULL){     
+			jbyteArray jbyteArray_cmd = hEnv->NewByteArray(hCCH->len);
+	
 			hEnv->SetByteArrayRegion(jbyteArray_cmd,0,hCCH->len,(jbyte*)hCCH->d);
 			
 			hEnv->CallVoidMethod(
@@ -811,13 +701,16 @@ void * IOCmdRecvProcess(
 				jbyteArray_cmd, 
 				hCCH->len
 				);
+
+			hEnv->DeleteLocalRef(jbyteArray_cmd); 
 	    }
 		
 		PUT_LOCK(&g_CallbackContextLock);
     }
 
-	hEnv->DeleteLocalRef(jbyteArray_cmd); 
     hEnv->DeleteLocalRef(jstring_did);
+
+	if(hCCH != NULL) free(hCCH);
 	
 #ifdef PLATFORM_ANDROID
 	if(isAttached) g_JavaVM->DetachCurrentThread();
@@ -954,7 +847,7 @@ static void * VideoRecvProcess(
 	while(hPC->videoPlaying)
 	{
 			
-		nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_VIDEO, (char *)hFrm, sizeof(AV_HEAD_YUNNI));
+		nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_VIDEO, (char *)hFrm, sizeof(AV_HEAD_YUNNI),&hPC->videoPlaying);
 
 		if(nRet < 0){
 			Log3("p2pChannel_Video_RecvProc  PPPP_IndeedRead failed  return: %d, %s", nRet,hPC->szDID);
@@ -966,36 +859,37 @@ static void * VideoRecvProcess(
 			continue;
 		}
 
-		nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_VIDEO, (char *)hFrm->d, hFrm->len);
-		
-		if(nRet < 0){
-			Log3("p2pChannel_Video_RecvProc  PPPP_IndeedRead failed  return: %d, %s", nRet,hPC->szDID);
-			firstKeyFrameComming = 0;
-			break;
-		}
-		
 		if(hFrm->startcode!=AVF_STARTCODE
 			||	hFrm->len > MAX_FRAME_LENGTH){
 			Log3("avhead invalid!!%s,startcode=%04x,len=%d\n",
 				 hPC->szDID,hFrm->startcode,hFrm->len);
+			PPPP_Close(hPC->sessionID);
 			break;
-			}
+		}
+
+		nRet = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_VIDEO, (char *)hFrm->d, hFrm->len, &hPC->videoPlaying);
 		
-		if(hFrm->len == 0){
-			continue;
+		if(nRet < 0){
+			Log3("p2pChannel_Video_RecvProc  PPPP_IndeedRead failed  return: %d, %s", nRet,hPC->szDID);
+			firstKeyFrameComming = 0;
+			break;
 		}
 		
 		if(0==hPC->m_bPlayStreamOK){
 			if (hFrm->type==0 || hFrm->type==1){
-				hPC->m_EnumVideoMode = ENUM_VIDEO_MODE_H264;
+				hPC->VideoRecvFormat = ENUM_VIDEO_MODE_H264;
 			}
 			else if(hFrm->type == 3){
-				hPC->m_EnumVideoMode = ENUM_VIDEO_MODE_MJPEG;
+				hPC->VideoRecvFormat = ENUM_VIDEO_MODE_MJPEG;
 			}
 			else{
 				continue;
 			}
 			hPC->m_bPlayStreamOK=1;
+		}
+
+		if(hPC->mediaEnabled != 1){
+			usleep(1000); continue;
 		}
 		
 		if(hFrm->type  == ENUM_FRAME_TYPE_I){
@@ -1073,22 +967,11 @@ static void * AudioRecvProcess(
 	void * hVoid
 ){    
 	SET_THREAD_NAME("AudioRecvProcess");
-	Log3("current AudioRecvProcess thread id is:[%d].",gettid());
+	Log3("current thread id is:[%d].",gettid());
 
 	int ret = 0;
 	CPPPPChannel * hPC = (CPPPPChannel*)hVoid;
 
-	void * hCodec = audio_dec_init(
-		hPC->AudioRecvFormat,
-		hPC->AudioSampleRate,
-		hPC->AudioChannel
-		);
-	
-	if(hCodec == NULL){
-		Log3("initialize audio decodec handle failed.\n");
-		return NULL;
-	}
-	
 	char Cache[2048] = {0};	
 	char Codec[4096] = {0};	
 
@@ -1096,13 +979,29 @@ static void * AudioRecvProcess(
     int  CodecLengthNeed = 960;
 	
 	AV_HEAD_YUNNI * avhead =(AV_HEAD_YUNNI *)Cache;
-
-	hPC->hAudioBuffer->Clear();
-	hPC->hSoundBuffer->Clear();
 	
 	//初始化
 	void * hAgc = NULL;
 	void * hNsx = NULL;
+
+	void * hCodec = NULL;
+
+jump_rst:
+	
+	hCodec = audio_dec_init(
+		hPC->AudioRecvFormat,
+		hPC->AudioSampleRate,
+		hPC->AudioChannel
+		);
+	
+	if(hCodec == NULL){
+//		Log3("initialize audio decodec handle failed.\n");
+		if(hPC->audioPlaying){
+			sleep(1);
+			goto jump_rst;
+		}
+		return NULL;
+	}
 	
 #ifdef ENABLE_AGC
 	hAgc = audio_agc_init(
@@ -1131,7 +1030,7 @@ static void * AudioRecvProcess(
 
 	while(hPC->audioPlaying){
 
-		ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_AUDIO, (char *)avhead, sizeof(AV_HEAD_YUNNI));
+		ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_AUDIO, (char *)avhead, sizeof(AV_HEAD_YUNNI),&hPC->audioPlaying);
 		
 		if( ret < 0 ){
 			Log3("Error!!!!PPPP_IndeedRead=%d\n",ret);
@@ -1139,13 +1038,14 @@ static void * AudioRecvProcess(
 		}
 		
 		if (avhead->startcode != AVF_STARTCODE){
-			Log3( "recv audio data is invalid!!,avhead.startcode=%04x\n",avhead->startcode );
+			Log3( "recv audio data is invalid!!,avhead.startcode=%04x\n",avhead->startcode);
+			PPPP_Close(hPC->sessionID);
 			break;
-			
 		}
 		
 		if( avhead->len > MAX_AUDIO_DATA_LENGTH){
-			Log3( "recv audio data is invalid!!,avhead.startcode=%04x,avhead.len=%d\n",avhead->startcode,avhead->len );
+			Log3( "recv audio data is invalid!!,avhead.startcode=%04x,avhead.len=%d\n",avhead->startcode,avhead->len,&hPC->audioPlaying );
+			PPPP_Close(hPC->sessionID);
 			break;
 		}
 
@@ -1154,7 +1054,7 @@ static void * AudioRecvProcess(
 			continue;
 		}
 		
-		ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_AUDIO, (char *)avhead->d, avhead->len);
+		ret = PPPP_IndeedRead(hPC->sessionID,P2P_CHANNEL_AUDIO, (char *)avhead->d, avhead->len,&hPC->audioPlaying);
 		
 		if( ret < 0 ){
 			Log3("Error!!!!PPPP_IndeedRead=%d\n",ret);
@@ -1162,8 +1062,11 @@ static void * AudioRecvProcess(
 		}
 		
 		if( (hPC->audioEnabled != 1)){
-			usleep(10000);
-			continue;
+			usleep(1000); continue;
+		}
+
+		if(hPC->mediaEnabled != 1){
+			usleep(1000); continue;
 		}
 		
 		if(avhead->audiocodec != hPC->AudioRecvFormat){
@@ -1209,6 +1112,8 @@ static void * AudioRecvProcess(
             continue;
         }
 
+//		Log3("audio recive with length:[%d].",CodecLength);
+
 		CodecLengthNeed = CodecLength - (CodecLength % hPC->Audio10msLength);
 		int Round = CodecLengthNeed/hPC->Audio10msLength;
         
@@ -1219,10 +1124,7 @@ static void * AudioRecvProcess(
 #ifdef ENABLE_AGC
 			audio_agc_proc(hAgc,&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength);
 #endif
-			if(hPC->audioEnabled){
-				hPC->hSoundBuffer->Put((char*)&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength); // for audio player callback
-			}
-			
+			hPC->hSoundBuffer->Put((char*)&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength); // for audio player callback
 #ifdef ENABLE_AUDIO_RECORD
 			hPC->hAudioBuffer->Put((char*)&Codec[hPC->Audio10msLength*i],hPC->Audio10msLength); // for audio avi record
 #endif
@@ -1230,7 +1132,6 @@ static void * AudioRecvProcess(
         
         CodecLength -= CodecLengthNeed;
         memcpy(Codec,&Codec[CodecLengthNeed],CodecLength);
-
 	}
 	
 jumperr:
@@ -1282,7 +1183,7 @@ static void * AudioSendProcess(
 	
 	if(hPC->hAudioPutList == NULL || hPC->hAudioGetList == NULL){
 		Log3("audio data list init failed.");
-		hPC->audioPlaying = 0;
+		hPC->audioSending = 0;
 	}
 	
 	OPENXL_STREAM * hOSL = NULL;
@@ -1316,13 +1217,7 @@ static void * AudioSendProcess(
 	char speakerData[320] = {0};
 	char captureData[320] = {0};
 	
-	while(hPC->audioPlaying){
-
-		if((hPC->voiceEnabled!=1)){
-			usleep(1000);
-			continue;
-		}
-		
+	while(hPC->audioSending){
 		int captureLens = hPC->hAudioGetList->Used();
 		int speakerLens = hPC->hAudioPutList->Used();
 
@@ -1338,7 +1233,6 @@ static void * AudioSendProcess(
 			usleep(10); 
 			continue;
 		}
-		
 		
 #ifdef ENABLE_AEC
 		if (audio_echo_cancellation_farend(hAEC,(char*)speakerData,hPC->Audio10msLength/sizeof(short)) != 0){
@@ -1582,47 +1476,153 @@ void * RecordingProcess(void * Ptr){
 }
 
 
-static void * MediaExitProcess(
+void * MeidaCoreProcess(
 	void * hVoid
-){    
-	SET_THREAD_NAME("CheckExitProcess");
-
-	pthread_detach(pthread_self());
+){
 	
+	SET_THREAD_NAME("MeidaCoreProcess");
+	
+	Log3("current thread id is:[%d].",gettid());
+
 	CPPPPChannel * hPC = (CPPPPChannel*)hVoid;
 
-	Log3("stop media process on device by avapi cmd ");
-	if(hPC->SendAVAPICloseIOCtrl() < 0){
-		Log3("SendAVAPICloseIOCtrl Error, PPPPClose !!!");
-		hPC->PPPPClose();
+	if(TRY_LOCK(&hPC->SessionLock) != 0){
+		Log3("media core process still running.");
+		return NULL;
+	}
+
+	JNIEnv * hEnv = NULL;
+#ifdef PLATFORM_ANDROID
+    char isAttached = 0;
+
+	int status = g_JavaVM->GetEnv((void **) &(hEnv), JNI_VERSION_1_4); 
+	if(status < 0){ 
+		status = g_JavaVM->AttachCurrentThread(&(hEnv), NULL); 
+		if(status < 0){
+			Log3("iocmd send process AttachCurrentThread Failed!!");
+			return NULL;
+		}
+		isAttached = 1;  
+	}
+#endif
+
+	int resend = 0;
+	int wakeup_times = 20;
+	int retry = 5;
+
+	int ret = 0;
+	int connection_status = PPPP_STATUS_DISCONNECTED;
+	
+connect:
+	Log3("NOTIFY UI WORK STATUS:[%d][%d]", MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
+    hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
+    
+	hPC->speakerChannel = -1;
+	hPC->avstremChannel =  0;
+	
+	Log3("[1:%s]=====>start get free session id for client connection.",
+         hPC->szDID);
+	//yunni p2p
+	Log3("Connect Begin----------------\n");
+	ret = hPC->Connect(hEnv);
+    switch(ret){
+		case 0:
+			break;
+		case -1:
+			connection_status = PPPP_STATUS_DISCONNECTED;
+			goto jumperr;
+		case -2:
+			connection_status = PPPP_STATUS_USER_NOT_LOGIN;
+			goto jumperr;
+		default:
+			goto jumperr;
 	}
 	
-	Log3("stop video process.");
-    if((long)hPC->videoRecvThread != -1) pthread_join(hPC->videoRecvThread,NULL);
-	if((long)hPC->videoPlayThread != -1) pthread_join(hPC->videoPlayThread,NULL);
+	hPC->videoPlaying = 1;
+	hPC->audioPlaying = 1;
+	hPC->audioSending = 1;
+	hPC->filesRecving = 1;
+
+	hPC->iocmdSending = 1;
+    hPC->iocmdRecving = 1;
+
+	hPC->mediaEnabled = 0;
 	
-	Log3("stop audio process.");
-    if((long)hPC->audioRecvThread != -1) pthread_join(hPC->audioRecvThread,NULL);
-  	if((long)hPC->audioSendThread != -1) pthread_join(hPC->audioSendThread,NULL);
-
-	Log3("stop recording process.");
-	hPC->CloseRecorder();
-
-	Log3("stop media process done.");
-	hPC->videoRecvThread = (pthread_t)-1;
-	hPC->videoPlayThread = (pthread_t)-1;
-	hPC->audioRecvThread = (pthread_t)-1;
-	hPC->audioSendThread = (pthread_t)-1;
-
-	GET_LOCK(&hPC->SessionStatusLock);
-	hPC->SessionStatus = STATUS_SESSION_IDLE;
-	Log3("SESSION STATUS:IDLE");
-	PUT_LOCK(&hPC->SessionStatusLock);
+	ret = pthread_create(&hPC->iocmdSendThread,NULL,IOCmdSendProcess,hVoid);
+	if(ret != 0){
+		Log3("create iocmd send process failed.");
+		goto jumperr;
+	}
 	
-	Log3("CloseMediaStreams Process finished ... ");
+    ret = pthread_create(&hPC->iocmdRecvThread,NULL,IOCmdRecvProcess,hVoid);
+	if(ret != 0){
+		Log3("create iocmd recv process failed.");
+		goto jumperr;
+	}
 
-	pthread_exit(0);
+	ret = pthread_create(&hPC->filesRecvThread,NULL,FilesRecvProcess,hVoid);
+	if(ret != 0){
+		Log3("create files recv process failed.");
+		goto jumperr;
+	}
+
+	ret = pthread_create(&hPC->videoRecvThread,NULL,VideoRecvProcess,hVoid);
+	if(ret != 0){
+		Log3("create video recv process failed.");
+		goto jumperr;
+	}
+
+	ret = pthread_create(&hPC->videoPlayThread,NULL,VideoPlayProcess,hVoid);
+	if(ret != 0){
+		Log3("create video play process failed.");
+		goto jumperr;
+	}
+	
+	ret = pthread_create(&hPC->audioRecvThread,NULL,AudioRecvProcess,hVoid);
+	if(ret != 0){
+		Log3("create video play process failed.");
+		goto jumperr;
+	}
+	
+	while(hPC->mediaLinking){
+		//Check User Status
+		st_PPPP_Session1 SInfo;
+		memset(&SInfo,0x00,sizeof(st_PPPP_Session1));
+		ret = PPPP_Check(hPC->sessionID,&SInfo);
+		
+		if(ret < 0){
+			Log3("NOTIFY UI WORK STATUS:[%d][%d]", MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_DEVICE_OFFLINE);
+			hPC->MsgNotify(hEnv,MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_DEVICE_OFFLINE);
+			break;
+		}
+
+		Log3("PPPP_Check:[%s] result:[%d].",SInfo.DID,ret);
+		
+		sleep(3);
+	}
+
+jumperr:
+
+	GET_LOCK(&hPC->DestoryLock);
+
+	hPC->PPPPClose();
+	hPC->CloseWholeThreads();
+
+	Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
+	hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+
+#ifdef PLATFORM_ANDROID
+	if(isAttached) g_JavaVM->DetachCurrentThread();
+#endif
+
+	PUT_LOCK(&hPC->DestoryLock);
+	PUT_LOCK(&hPC->SessionLock);
+
+	Log3("media core process:[%d] exit ..............",gettid());
+
+	return NULL;	
 }
+
 
 CPPPPChannel::CPPPPChannel(
 	char *DID,
@@ -1654,9 +1654,9 @@ CPPPPChannel::CPPPPChannel(
 	audioEnabled = 0;
 	mediaEnabled = 0;
 	speakEnabled = 1;
+    filesRecving = 0;
 	
-    fileRecving=0;
-	fileRecvThread= (pthread_t)-1;
+	filesRecvThread = (pthread_t)-1;
 	mediaCoreThread = (pthread_t)-1;
 	iocmdSendThread = (pthread_t)-1;
 	iocmdRecvThread = (pthread_t)-1;
@@ -1689,13 +1689,9 @@ CPPPPChannel::CPPPPChannel(
 	INT_LOCK(&CaptureLock);
 	INT_LOCK(&DisplayLock);
 	INT_LOCK(&SndplayLock);
-	
-	INT_LOCK(&SessionStatusLock);
-	
-	GET_LOCK(&SessionStatusLock);
-	SessionStatus = STATUS_SESSION_DIED;
-	Log3("SESSION STATUS:DIED");
-	PUT_LOCK(&SessionStatusLock);
+	INT_LOCK(&SessionLock);
+	INT_LOCK(&PlayingLock);
+	INT_LOCK(&DestoryLock);
 
 	hDec = new CH264Decoder();
 
@@ -1703,35 +1699,23 @@ CPPPPChannel::CPPPPChannel(
 
 CPPPPChannel::~CPPPPChannel()
 {
-    Log3("start free class pppp channel:[0] start.");
-	
-    Log3("start free class pppp channel:[1] close p2p connection and threads."); 
-	
 	Close();
-
-	Log3("start free class pppp channel:[2] free buffer.");
 
 	delete(hAudioBuffer);
 	delete(hVideoBuffer);
 	delete(hSoundBuffer);
 	delete(hIOCmdBuffer);
-	
-/*
-	hIOCmdBuffer = 
-	hAudioBuffer = 
-	hSoundBuffer = 
-	hVideoBuffer = NULL; 
-*/
-    Log3("start free class pppp channel:[3] free lock.");
 
 	DEL_LOCK(&CaptureLock);
 	DEL_LOCK(&DisplayLock);
 	DEL_LOCK(&SndplayLock);
-	DEL_LOCK(&SessionStatusLock);
+	DEL_LOCK(&SessionLock);
+	DEL_LOCK(&PlayingLock);
+	DEL_LOCK(&DestoryLock);
 
 	if(hDec) delete(hDec); hDec = NULL;
     
-    Log3("start free class pppp channel:[4] close done.");
+    Log3("destory pppp channel with did:[%s] done.",szDID);
 }
 
 void CPPPPChannel::MsgNotify(
@@ -1739,7 +1723,6 @@ void CPPPPChannel::MsgNotify(
     int MsgType,
     int Param
 ){
-	Log3("get callback lock from MsgNotify");
     GET_LOCK( &g_CallbackContextLock );
     if(g_CallBack_Handle != NULL && g_CallBack_ConnectionNotify!= NULL){
         jstring jsDID = ((JNIEnv *)hEnv)->NewStringUTF(szDID);
@@ -1747,53 +1730,17 @@ void CPPPPChannel::MsgNotify(
         ((JNIEnv *)hEnv)->DeleteLocalRef(jsDID);
     }
 	PUT_LOCK( &g_CallbackContextLock );
-	Log3("put callback lock from MsgNotify");
 }
-
-int CPPPPChannel::StartFileRecvThread()
-{
-    if(fileRecvThread != ((pthread_t)-1)
-		|| fileRecving!=0){
-        return 0;
-    }
-
-    fileRecving = 1;
-
-	Log3("FileRecvProcess ======================> Begin!");
-	if (0!=pthread_create(&fileRecvThread, NULL, FileRecvProcess, (void*)this)){
-		fileRecvThread = (pthread_t)-1;
-		fileRecving=0;
-		return -1;
-	}
-	
-	return 0;
-}
-
-int CPPPPChannel::ExtAckCmdHeaderBuild(exSendCmd_t *extCmdHead,unsigned char sessionHandle,short cmd,short len){
-	int ackValue=0;
-	if (szTicket[0]==0x00 && cmd!=CMD_SYSTEM_USER_CHK){
-		ackValue=APP_ERR_UNAUTH;
-		}
-
-    extCmdHead->cmdhead.startcode = CMD_START_CODE;
-	extCmdHead->cmdhead.cmd=cmd;
-	extCmdHead->cmdhead.len=len+4;//加4为ticket长度
-	memcpy(extCmdHead->ticket,&ackValue,4);
-	
-	char *gwChr=(char *)&extCmdHead->cmdhead.version;
-	gwChr[0]=sessionHandle;
-
-	return 0;
-	}
 
 int CPPPPChannel::ExtCmdHeaderBuild(exSendCmd_t *extCmdHead,unsigned char gwChannel,short cmd,short len){
 	if (len>1000){
 		return -1005;
 	}
-	Log3("Check szTicket[0] value --------------> %04x",szTicket[0]);
+	
 	if (szTicket[0]==0x00 && cmd!=CMD_SYSTEM_USER_CHK){
 		return -1004;;
 	}
+	
     extCmdHead->cmdhead.startcode = CMD_START_CODE;
 	extCmdHead->cmdhead.cmd=cmd;
 	extCmdHead->cmdhead.len=len+4;//加4为ticket长度
@@ -1803,79 +1750,25 @@ int CPPPPChannel::ExtCmdHeaderBuild(exSendCmd_t *extCmdHead,unsigned char gwChan
 	gwChr[0]=gwChannel;
 
 	return 0;
-	}
+}
 
-int CPPPPChannel::SetSystemParams_yunni(
-	int gwChannel,
-	int cmdType, 
-	char *cmdContent, 
-	int cmdLen
-	){
+int CPPPPChannel::IOCmdSend(
+	int 	gwChannel,
+	int 	cmdType, 
+	char *	cmdContent, 
+	int 	cmdLen
+){
 	//F_LOG;
     int nRet=0,extCmdLen=sizeof(exSendCmd_t);
 	unsigned char cGwChannel=0x00;
     exSendCmd_t extCmdHead;
 	char buf[1024]={0,};
-	
-	//本地需要作处理的命令
-	switch(cmdType){
-		case CMD_DATACTRL_AUDIO_START:
-			audioEnabled=1;
-			break;
-		case CMD_DATACTRL_AUDIO_STOP:
-			audioEnabled=0;
-			break;
-		case CMD_DATACTRL_TALK_START:
-			voiceEnabled=1;
-			break;
-		case CMD_DATACTRL_TALK_STOP:
-			voiceEnabled=0;
-			break;
-		case CMD_DATACTRL_PLAYLIVE_START:	
-			videoPlayEnabled=1;		
-			m_bPlayStreamOK = 0; 	
-			break;
-		case CMD_DATACTRL_PLAYLIVE_STOP:
-			videoPlayEnabled=0; 
-			break;
-		case CMD_DATACTRL_PLAYBACK_START:
-			if(sessionID < 0) return -1;
-			GET_LOCK(&SessionStatusLock);
-			if(SessionStatus != STATUS_SESSION_IDLE){
-				Log3("session status is:[%d],can't start living stream.\n",SessionStatus);
-				PUT_LOCK(&SessionStatusLock);
-				return -1;
-			}
-			SessionStatus = STATUS_SESSION_PLAYING;
-			Log3("SESSION STATUS:PLAY");
-			PUT_LOCK(&SessionStatusLock);
-			mediaEnabled = 1;
-			StartVideoChannel();
-		 	break;
-		case CMD_DATACTRL_PLAYBACK_STOP:
-			
-			mediaEnabled = 0;
-			videoPlaying = 0;   
-			Log3("stop video process.");
-			
-		//	if(videoRecvThread != -1) pthread_join(videoRecvThread,NULL);
-		//	if(videoPlayThread != -1) pthread_join(videoPlayThread,NULL);
-
-			GET_LOCK(&SessionStatusLock);
-				SessionStatus = STATUS_SESSION_IDLE;
-			PUT_LOCK(&SessionStatusLock);
-
-			break;
-			
-		}
-
 
 	cGwChannel=gwChannel;
 	memset(&extCmdHead,0x00,extCmdLen);
 	
 	nRet=ExtCmdHeaderBuild(&extCmdHead,cGwChannel,cmdType,cmdLen);
 	if (nRet<0){
-		Log3("ret[%d:%d]---[%04x]",sessionID,nRet,cmdType);
 		return nRet;
 	}
 		
@@ -1889,23 +1782,22 @@ int CPPPPChannel::SetSystemParams_yunni(
 	return 0;
 }
 
-int  CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
+int  CPPPPChannel::Connect(JNIEnv *env)
 {
    // F_LOG;
-	Log3("PPPP_Connect begin...%s\n svrstr:%s\n", szDID,szServer);
 	int msgType=MSG_NOTIFY_TYPE_CONNECT_PPPP_STATUS;
 	int msgLen=4;
 	int iMsgContent;
 	char *svrStr=NULL;
 	sessionID = PPPP_Connect(szDID,1,0,&svrStr);
-	Log3("PPPP_Connect begin...szDID:%s sessionID:%d svrstr:%s\n", szDID,sessionID,szServer);
+
 	if(sessionID < 0){
 		Log3("PPPP_Connect failed.. %s return: %d", szDID, sessionID);  
 		if (sessionID==ERROR_PPPP_SERVER_CHANGED){
 			Log3("server changed, svr:%s\n",(svrStr==NULL)?"null":svrStr);
 			if (svrStr!=NULL)free(svrStr);
 			return -1;
-			}
+		}
 		
 		switch(sessionID)
 		{
@@ -1941,30 +1833,21 @@ int  CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
 			case ERROR_PPPP_USER_CONNECT_BREAK: 
 				iMsgContent=PPPP_STATUS_DEVICE_OFFLINE;
 				break;
-
 			default:
 				iMsgContent=PPPP_STATUS_UNKNOWN_ERROR;
 				break;
 		}
-		Log3("sessionID[%d]MsgNotify:msgType=%d,iMsgContent=%d\n",sessionID,msgType,iMsgContent);
+
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",msgType,iMsgContent);
 		MsgNotify(env,msgType,iMsgContent);
-		Log3("UILayer status set done");
 		return -1;
 	}
-	
 
-	/* 获取pppp session 信息 */
-	st_PPPP_Session1 SInfo;
-	if(PPPP_Check(sessionID, &SInfo) != ERROR_PPPP_SUCCESSFUL){
-	   return -1;
-	}
-	//发送验证信息
-
-	Log3("user:%s, pass:%s",szUsr,szPwd);
 	
 	if(strcmp(szUsr,"") == 0){
 		//首次添加默认未登陆状态
 		iMsgContent=PPPP_STATUS_USER_NOT_LOGIN;
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",msgType,iMsgContent);
 		MsgNotify(env,msgType,iMsgContent);
 		return -2;
 	}
@@ -1973,10 +1856,9 @@ int  CPPPPChannel::p2p_ConnectProc(JNIEnv *env)
 	strncpy(userParam.name,szUsr,32);
 	strncpy(userParam.pass,szPwd,128);
 
-	//SetSystemParams_yunni(0xff,CMD_SYSTEM_USER_CHK,(char *)&userParam,sizeof(user_t));
+	//IOCmdSend(0xff,CMD_SYSTEM_USER_CHK,(char *)&userParam,sizeof(user_t));
 	char * Cgi = (char *)malloc(sizeof(userParam.name)+sizeof(userParam.pass));
 	sprintf(Cgi,"name=%.32s&password=%.128s&",userParam.name,userParam.pass);
-	Log3("sprintf Cgi result is : %s ",Cgi);
 	SendCmds(sessionID,CMD_SYSTEM_USER_CHK,Cgi,(void *)this);
 
 	return 0;
@@ -1994,44 +1876,51 @@ void CPPPPChannel::ConnectUserCheckAcK(
 
 	if (pbuf == NULL||len<4){
 		iMsgContent=PPPP_STATUS_USER_INVALID;
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
 		MsgNotify(env,iMsgType,iMsgContent);
 		return;
 	}
 	
 	//处理回应
-	if (len<4+sizeof(st_usrChkRet)){
+	if (len < 4 + sizeof(st_usrChkRet)){
 		memcpy(&ret,pbuf,4);
 		
-	Log3("Check User Connection status : [%d] \n",ret);
-	switch(ret){
-		case APP_ERR_OK:
-			iMsgContent=PPPP_STATUS_USER_INVALID;
-			break;
-		case APP_ERR_UNAUTH:
-		case APP_ERR_INVALID_PARAM:
-		case APP_ERR_CMDEXCUTE_FAILED:
-		case APP_ERR_NONE_RESULT:
-		case APP_ERR_UNKNOWN:
-		case APP_ERR_NO_PRIVILEGE:
-			iMsgContent=PPPP_STATUS_USER_INVALID;
-			break;
+		switch(ret){
+			case APP_ERR_OK:
+				iMsgContent = PPPP_STATUS_USER_INVALID;
+				break;
+			case APP_ERR_UNAUTH:
+			case APP_ERR_INVALID_PARAM:
+			case APP_ERR_CMDEXCUTE_FAILED:
+			case APP_ERR_NONE_RESULT:
+			case APP_ERR_UNKNOWN:
+			case APP_ERR_NO_PRIVILEGE:
+				iMsgContent = PPPP_STATUS_USER_INVALID;
+			default:
+				Log3("get unknow err code:[%d].",ret);
+				iMsgContent = PPPP_STATUS_USER_NOT_LOGIN;
+				break;
 		}
+		
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
 		MsgNotify(env,iMsgType,iMsgContent);
+		
 		return;
 	}
 	
     st_usrChkRet *p = (st_usrChkRet *)(pbuf+4);
 
-	Log3("privilege:%d,ticket:%s",p->privilege,p->ticket);
 	if (p->privilege > 0){
 		 strncpy(szTicket,p->ticket,4);
 		 iMsgContent=PPPP_STATUS_CONNECTED ;
+		 Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
 		 MsgNotify(env,iMsgType,iMsgContent);
 		 Log3("Connect success--------%s\n",szDID);
 		 return;
 	}
 	else{
 		iMsgContent=PPPP_STATUS_USER_INVALID;
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
 		MsgNotify(env,iMsgType,iMsgContent);
 		return;
 	}
@@ -2041,13 +1930,13 @@ int CPPPPChannel::PPPPClose()
 {
 	Log3("close connection by did:[%s] called.",szDID);
 
-// yunni p2p 
 	int Ret = 0;
 	if(sessionID >= 0){ 	   
 		Ret = PPPP_ForceClose(sessionID);
 	}else{
 	 	Ret = PPPP_Break(szDID);
 	}
+	
 	Log3("PPPP Close status value : [%d]  \n",Ret);
 
 	avIdx = spIdx = speakerChannel = SID = sessionID = -1;
@@ -2057,106 +1946,45 @@ int CPPPPChannel::PPPPClose()
 
 int CPPPPChannel::Start(char * usr,char * pwd,char * server)
 {   
-    Log3("start pppp connection to device with uuid:[%s].\n",szDID);
-
-	GET_LOCK(&SessionStatusLock);
-	if(SessionStatus != STATUS_SESSION_DIED){
-		Log3("session status is:[%d],can't start pppp connection.\n",SessionStatus);
-		PUT_LOCK(&SessionStatusLock);
+	if(TRY_LOCK(&SessionLock) != 0){
+		Log3("pppp connection with uuid:[%s] still running",szDID);
 		return -1;
 	}
-	SessionStatus = STATUS_SESSION_START;
-	Log3("SESSION STATUS:START");
-	PUT_LOCK(&SessionStatusLock);
 
-	StartMediaChannel();
+	Log3("start pppp connection to device with uuid:[%s].",szDID);
+	mediaLinking = 1;
+	pthread_create(&mediaCoreThread,NULL,MeidaCoreProcess,(void*)this);
+
+	PUT_LOCK(&SessionLock);
 	
     return 0;
 }
 
 void CPPPPChannel::Close()
 {
-	GET_LOCK(&SessionStatusLock);
-	SessionStatus = STATUS_SESSION_CLOSE;
-	Log3("SESSION STATUS:CLOSE");
-	PUT_LOCK(&SessionStatusLock);
-	
 	mediaLinking = 0;
-	
-	if(mediaCoreThread != (pthread_t)-1){
-		pthread_join(mediaCoreThread,NULL);
-		mediaCoreThread = (pthread_t)-1;
-	}else{
-		GET_LOCK(&SessionStatusLock);
-		SessionStatus = STATUS_SESSION_DIED;
-		Log3("SESSION STATUS:DIED");
-		PUT_LOCK(&SessionStatusLock);
+
+	while(1){
+		if(TRY_LOCK(&SessionLock) == 0){
+			break;
+		}
+		
+		Log3("waiting for core media process exit.");
+		sleep(1);
 	}
 
-	Log3("stop media core thread.");
-	
-}
-
-int CPPPPChannel::StartMediaChannel()
-{
-
-	mediaLinking = 1;
-	pthread_create(&mediaCoreThread,NULL,MeidaCoreProcess,(void*)this);
-	
-	return 1;
-}
-
-int CPPPPChannel::StartIOCmdChannel()
-{
-	iocmdSending = 1;
-    iocmdRecving = 1;
-	
-	pthread_create(&iocmdSendThread,NULL,IOCmdSendProcess,(void*)this);
-    pthread_create(&iocmdRecvThread,NULL,IOCmdRecvProcess,(void*)this);
-	
-    return 1;
-}
-
-int CPPPPChannel::StartAudioChannel()
-{
-   	audioPlaying = 1;
-	audioEnabled = 1;
-	voiceEnabled = 1;
-	
-	pthread_create(&audioRecvThread,NULL,AudioRecvProcess,(void*)this);
-	pthread_create(&audioSendThread,NULL,AudioSendProcess,(void*)this);
-	
-    return 1;
-	
-}
-
-int CPPPPChannel::StartVideoChannel()
-{
-    videoPlaying = 1;
-	
-	int Err = 0;
-	Err = pthread_create(&videoRecvThread,NULL,VideoRecvProcess,(void*)this);
-	if(Err != 0){
-		Log3("create video recv process failed.");
-		goto jumperr;
-	}
-
-	Err = pthread_create(&videoPlayThread,NULL,VideoPlayProcess,(void*)this);
-	if(Err != 0){
-		Log3("create video play process failed.");
-		goto jumperr;
-	}
-
-    return 1;
-
-jumperr:
-
-	videoPlaying = 0;
-
-	return 0;
+	PUT_LOCK(&SessionLock);
 }
 
 int CPPPPChannel::SendAVAPIStartIOCtrl(){
+
+	//发送视频开启指令
+	SendCmds(sessionID,CMD_DATACTRL_PLAYLIVE_START,NULL,(void *)this);
+	//发送音频开启指令
+	SendCmds(sessionID,CMD_DATACTRL_AUDIO_START,NULL,(void *)this);
+	//发送对讲开启指令
+	SendCmds(sessionID,CMD_DATACTRL_TALK_START,NULL,(void *)this);
+	
 	return 0;
 }
 
@@ -2164,20 +1992,19 @@ int CPPPPChannel::SendAVAPICloseIOCtrl(){
 	int ret = 0;
 	SendCmds(sessionID,CMD_DATACTRL_PLAYLIVE_STOP,NULL,(void *)this);
 	if(ret < 0){
-		Log3("SetSystemParams_yunni failed with err:[%d],sessionID:[%d].",ret,sessionID);
+		Log3("IOCmdSend failed with err:[%d],sessionID:[%d].",ret,sessionID);
 		return ret;
 	}
 	
-
 	SendCmds(sessionID,CMD_DATACTRL_AUDIO_STOP,NULL,(void *)this);
 	if(ret < 0){
-		Log3("SetSystemParams_yunni failed with err:[%d],sessionID:[%d].",ret,sessionID);
+		Log3("IOCmdSend failed with err:[%d],sessionID:[%d].",ret,sessionID);
 		return ret;
 	}
 
 	SendCmds(sessionID,CMD_DATACTRL_TALK_STOP,NULL,(void *)this);
 	if(ret < 0){
-		Log3("SetSystemParams_yunni failed with err:[%d],sessionID:[%d].",ret,sessionID);
+		Log3("IOCmdSend failed with err:[%d],sessionID:[%d].",ret,sessionID);
 		return ret;
 	}
 
@@ -2187,24 +2014,17 @@ int CPPPPChannel::SendAVAPICloseIOCtrl(){
 int CPPPPChannel::CloseWholeThreads()
 {
     //F_LOG;
-    if(!iocmdSending 
-		|| !iocmdRecving 
-		|| !mediaEnabled 
-		|| !audioPlaying 
-		|| !videoPlaying
-		|| !fileRecving
-	){
-		iocmdSending = 0;
-    	iocmdRecving = 0;
-		mediaEnabled = 0;
-    	audioPlaying = 0;
-		videoPlaying = 0;
-		fileRecving = 0;
-	}
+	iocmdSending = 0;
+	iocmdRecving = 0;
+	mediaEnabled = 0;
+	audioPlaying = 0;
+	audioSending = 0;
+	videoPlaying = 0;
+	filesRecving = 0;
 
 	recordingExit = 0;
-	Log3("stop iocmd process.");
 	
+	Log3("stop iocmd process.");
     if(iocmdSendThread != (pthread_t)-1) pthread_join(iocmdSendThread,NULL);
 	iocmdSendThread = (pthread_t)-1;
 	if(iocmdRecvThread != (pthread_t)-1) pthread_join(iocmdRecvThread,NULL);
@@ -2222,9 +2042,9 @@ int CPPPPChannel::CloseWholeThreads()
 	audioRecvThread = (pthread_t)-1;
 	audioSendThread = (pthread_t)-1;
 	
-	Log3("stop FileRecv process.");
-	if(fileRecvThread!= (pthread_t)-1) pthread_join(fileRecvThread,NULL);
-	fileRecvThread = (pthread_t)-1;
+	Log3("stop files process.");
+	if(filesRecvThread != (pthread_t)-1) pthread_join(filesRecvThread,NULL);
+	filesRecvThread = (pthread_t)-1;
 		
 	Log3("stop recording process.");
 	CloseRecorder();
@@ -2236,22 +2056,27 @@ int CPPPPChannel::CloseWholeThreads()
 
 int CPPPPChannel::CloseMediaStreams(
 ){
-	GET_LOCK(&SessionStatusLock);
-	if(SessionStatus != STATUS_SESSION_PLAYING){
-		Log3("session status is:[%d],can't close living stream.\n",SessionStatus);
-		PUT_LOCK(&SessionStatusLock);
+	if(TRY_LOCK(&PlayingLock) == 0){
+		Log3("stream not in playing");
+		PUT_LOCK(&PlayingLock);
 		return -1;
 	}
-	SessionStatus = STATUS_SESSION_IDLE;
-	Log3("SESSION STATUS:IDLE");
-	PUT_LOCK(&SessionStatusLock);
-	
-	mediaEnabled = 0;
-	videoPlaying = 0;
-	audioPlaying = 0;
 
-	pthread_t tid;
-	pthread_create(&tid,NULL,MediaExitProcess,(void*)this);
+	mediaEnabled = 0;
+	audioSending = 0;
+
+	SendAVAPICloseIOCtrl();
+	
+  	if((long)audioSendThread != -1){
+		pthread_join(audioSendThread,NULL);
+  	}
+
+	CloseRecorder();
+	audioSendThread = (pthread_t)-1;
+	
+	Log3("close media stream success ... ");
+
+	PUT_LOCK(&PlayingLock);
 	
 	return 0;
 }
@@ -2272,21 +2097,20 @@ int CPPPPChannel::StartMediaStreams(
 		Log3("invliad session...");
 		return -1;
 	}
-	
-	GET_LOCK(&SessionStatusLock);
-	if(SessionStatus != STATUS_SESSION_IDLE){
-		Log3("session status is:[%d],can't start living stream.\n",SessionStatus);
-		ret = SessionStatus;
-		PUT_LOCK(&SessionStatusLock);
-		goto jumperr;
+
+	if(TRY_LOCK(&PlayingLock) != 0){
+		Log3("media stream already start. waiting for close");
+		return -1;
 	}
-	SessionStatus = STATUS_SESSION_PLAYING;
-	Log3("SESSION STATUS:PLAY");
-	PUT_LOCK(&SessionStatusLock);
-	
+
+	if(TRY_LOCK(&DestoryLock) != 0){
+		Log3("media stream will be destory.");
+	}
+
 	Log3("media stream start here.");
 
 	mediaEnabled = 1;
+	audioSending = 1;
 
 	// pppp://usr:pwd@livingstream:[channel id]
 	// pppp://usr:pwd@replay/mnt/sdcard/replay/file
@@ -2319,19 +2143,12 @@ int CPPPPChannel::StartMediaStreams(
 	if(url != NULL){
 		memcpy(szURL,url,strlen(url));
 	}
-	
-	//发送视频开启指令
-	Log3("Send instruction to Driver !");
-	SendCmds(sessionID,CMD_DATACTRL_PLAYLIVE_START,NULL,(void *)this);
-	//发送音频开启指令
-	SendCmds(sessionID,CMD_DATACTRL_AUDIO_START,NULL,(void *)this);
-	//发送对讲开启指令
-	SendCmds(sessionID,CMD_DATACTRL_TALK_START,NULL,(void *)this);
-	
-	Log3("channel init video proc.");
-    StartVideoChannel();
-	Log3("channel init audio proc.");
-	StartAudioChannel();
+
+	pthread_create(&audioSendThread,NULL,AudioSendProcess,(void*)this);
+
+	SendAVAPIStartIOCtrl();
+
+	PUT_LOCK(&DestoryLock);
 
 	return 0;
 	
@@ -2340,8 +2157,7 @@ jumperr:
 	return ret;
 }
 
-int CPPPPChannel::SetSystemParams(int type,char * msg,int len)
-{
+int CPPPPChannel::SetSystemParams(int type,char * msg,int len){
 	char AppCmds[2048] = {0};
 	APP_CMD_HEAD * hCmds = (APP_CMD_HEAD*)AppCmds;
 	
@@ -2363,8 +2179,6 @@ void CPPPPChannel::AlarmNotifyDoorBell(JNIEnv* hEnv,char *did, char *type, char 
 		jstring resultDid  = hEnv->NewStringUTF( did );
 		jstring resultType = hEnv->NewStringUTF( type );
 		jstring resultTime = hEnv->NewStringUTF( time );
-
-		Log3("device msg push to %s with type:[%s] time:[%s].",did,type,time);
 
 		hEnv->CallVoidMethod( g_CallBack_Handle, g_CallBack_AlarmNotifyDoorBell, jdid, resultDid, resultType, resultTime );
 
