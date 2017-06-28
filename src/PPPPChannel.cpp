@@ -1520,6 +1520,8 @@ void * MeidaCoreProcess(
 	int ret = 0;
 	int connection_status = PPPP_STATUS_DISCONNECTED;
 	
+	hPC->startSession = 0;
+	
 connect:
 	Log3("NOTIFY UI WORK STATUS:[%d][%d]", MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
 	
@@ -1603,7 +1605,10 @@ connect:
 			break;
 		}
 
-//		Log3("PPPP_Check:[%s] result:[%d].",SInfo.DID,ret);
+		if(hPC->startSession){	// for reconnect, we just refresh status for ui layer
+			hPC->MsgNotify(hEnv,MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTED);
+			hPC->startSession = 0;
+		}
 		
 		sleep(3);
 	}
@@ -1665,6 +1670,8 @@ CPPPPChannel::CPPPPChannel(
 	mediaEnabled = 0;
 	speakEnabled = 1;
     filesRecving = 0;
+
+	startSession = 0;
 	
 	filesRecvThread = (pthread_t)-1;
 	mediaCoreThread = (pthread_t)-1;
@@ -1679,8 +1686,6 @@ CPPPPChannel::CPPPPChannel(
 
 	recordingExit = 0;
 	avIdx = spIdx = sessionID = -1;
-
-    SID = -1;
 
 	AudioSaveLength = 0;
 
@@ -1974,7 +1979,7 @@ int CPPPPChannel::PPPPClose()
 	
 	Log3("PPPP Close status value : [%d]  \n",Ret);
 
-	avIdx = spIdx = speakerChannel = SID = sessionID = -1;
+	avIdx = spIdx = speakerChannel = sessionID = -1;
 
 	return 0;
 }
@@ -1983,6 +1988,7 @@ int CPPPPChannel::Start(char * usr,char * pwd,char * server)
 {   
 	if(TRY_LOCK(&SessionLock) != 0){
 		Log3("pppp connection with uuid:[%s] still running",szDID);
+		startSession = 1;
 		return -1;
 	}
 

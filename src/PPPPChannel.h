@@ -205,9 +205,8 @@ public:
 	int					avIdx;			//
 	int					spIdx;			//
 	unsigned int		deviceType;		//
-    int                 deviceStandby;
 
-	int					SID; 			// P2P session id
+	int					startSession;	//
 	
     int 				mediaEnabled;	// enable recv thread get media stream data.
 	int					voiceEnabled;	// enable voice
