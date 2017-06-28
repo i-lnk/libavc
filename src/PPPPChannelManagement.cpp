@@ -4,18 +4,11 @@
 #endif
 
 #include "utility.h"
-#ifdef TUTK_PPPP
-#include "IOTCAPIs.h"
-#include "AVAPIs.h"
-#include "AVFRAMEINFO.h"
-#include "AVIOCTRLDEFs.h"
-#else
 #include "PPPP_API.h"
-#endif
-
 #include "PPPPChannelManagement.h"
 
 static COMMO_LOCK PPPPChannelLock = PTHREAD_MUTEX_INITIALIZER;
+static PPPP_CHANNEL sessions[MAX_PPPP_CHANNEL_NUM] = {0};
 
 CPPPPChannelManagement::CPPPPChannelManagement()
 {
@@ -25,42 +18,23 @@ CPPPPChannelManagement::CPPPPChannelManagement()
 	char szIOVer[4];
 	sprintf(szIOVer, "%d.%d.%d.%d", p1[3], p1[2], p1[1], p1[0]);
 	Log3("PPPP_GetAPIVersion  [%s] ", szIOVer);
-	
-	Log3("CPPPPChannelManagement ------------------>1");
-	int i = 0;
-	for(i = 0;i < MAX_PPPP_CHANNEL_NUM;i++){
-		memset(&m_PPPPChannel[i], 0 ,sizeof(PPPP_CHANNEL));
-	}
-	Log3("CPPPPChannelManagement ------------------>2");
-
-	int err = 0;
-	
-	err = INT_LOCK( &PPPPChannelLock );
-	if(err != 0){
-		Log3("initialize lock error:[%d].",errno);
-	}
-
-	Log3("fucking thses lock cause start failed;[%p].",&PPPPChannelLock);
-	Log3("fucking thses lock cause start failed;[%p].",&PPPPChannelLock);
-	Log3("fucking thses lock cause start failed;[%p].",&PPPPChannelLock);
 
 	GET_LOCK( &PPPPChannelLock );
+	
+	int i = 0;
+	for(i = 0;i < MAX_PPPP_CHANNEL_NUM;i++){
+		memset(&sessions[i], 0 ,sizeof(PPPP_CHANNEL));
+	}
+
 	PUT_LOCK( &PPPPChannelLock );
 	
     InitOpenXL();
-
-	Log3("CPPPPChannelManagement ------------------>3");
 }
 
 CPPPPChannelManagement::~CPPPPChannelManagement()
 {    
     StopAll();
-	Log3("stopall done.");
-
-	Log3("stop channel lock done.");
 	DEL_LOCK( &PPPPChannelLock );
-	Log3("CPPPPChannelManagement Done.");
-	
 }
 
 int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *server)
@@ -78,22 +52,24 @@ int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *serv
 
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(strcmp(m_PPPPChannel[i].szDID, szDID) == 0){
-           	r = m_PPPPChannel[i].pPPPPChannel->Start(user, pwd, server);
+        if(strcmp(sessions[i].szDID, szDID) == 0){
+           	r = sessions[i].session->Start(user, pwd, server);
             goto jumpout;
         }
     }
 
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 0)
+		Log3("Looking for [%s][%d]",sessions[i].szDID,sessions[i].bValid);
+	
+        if(sessions[i].bValid == 0)
         {
-            m_PPPPChannel[i].bValid = 1;
+            sessions[i].bValid = 1;
 
-            strcpy(m_PPPPChannel[i].szDID, szDID); 
+            strcpy(sessions[i].szDID, szDID); 
 			
-            m_PPPPChannel[i].pPPPPChannel = new CPPPPChannel(szDID, user, pwd, server);
-            m_PPPPChannel[i].pPPPPChannel->Start(user, pwd, server);
+            sessions[i].session = new CPPPPChannel(szDID, user, pwd, server);
+            sessions[i].session->Start(user, pwd, server);
 			
 			goto jumpout;
         }
@@ -120,11 +96,11 @@ int CPPPPChannelManagement::Stop(char * szDID)
     int i;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0)
         {            
-            memset(m_PPPPChannel[i].szDID, 0, sizeof(m_PPPPChannel[i].szDID));
-            SAFE_DELETE(m_PPPPChannel[i].pPPPPChannel);       
-            m_PPPPChannel[i].bValid = 0;
+            memset(sessions[i].szDID, 0, sizeof(sessions[i].szDID));
+            SAFE_DELETE(sessions[i].session);       
+            sessions[i].bValid = 0;
 
 			Log3("stop put channel lock");
 			PUT_LOCK( &PPPPChannelLock );
@@ -148,15 +124,15 @@ void CPPPPChannelManagement::StopAll(){
     
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1)
+        if(sessions[i].bValid == 1)
         {
-			Log3("close channel with sid:[%s] done.",m_PPPPChannel[i].szDID);
+			Log3("close channel with sid:[%s] done.",sessions[i].szDID);
 		
-            memset(m_PPPPChannel[i].szDID, 0, sizeof(m_PPPPChannel[i].szDID));
-            SAFE_DELETE(m_PPPPChannel[i].pPPPPChannel);           
-            m_PPPPChannel[i].bValid = 0;
+            memset(sessions[i].szDID, 0, sizeof(sessions[i].szDID));
+            SAFE_DELETE(sessions[i].session);           
+            sessions[i].bValid = 0;
 
-			Log3("close channel done.",m_PPPPChannel[i].szDID);
+			Log3("close channel done.",sessions[i].szDID);
         }
     } 
 
@@ -181,10 +157,10 @@ int CPPPPChannelManagement::StartPPPPLivestream(
     int i;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0)
         {
         	Log3("start connection with did:[%s].",szDID);
-           ret = m_PPPPChannel[i].pPPPPChannel->StartMediaStreams(
+           ret = sessions[i].session->StartMediaStreams(
 					szURL,
 					8000,
 					1,
@@ -222,10 +198,10 @@ int CPPPPChannelManagement::ClosePPPPLivestream(char * szDID){
     int i;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0)
         {
         	Log3("channel manager close live stream by %s.",szDID);
-           	ret = m_PPPPChannel[i].pPPPPChannel->CloseMediaStreams();
+           	ret = sessions[i].session->CloseMediaStreams();
             break;
         }
     }  
@@ -248,14 +224,14 @@ int CPPPPChannelManagement::GetAudioStatus(char * szDID){
     int i;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-    	if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+    	if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0)
         {
 			Log3("GET ----> AUDIO PLAY:[%d] AUDIO TALK:[%d].",
-				m_PPPPChannel[i].pPPPPChannel->audioEnabled,
-				m_PPPPChannel[i].pPPPPChannel->voiceEnabled
+				sessions[i].session->audioEnabled,
+				sessions[i].session->voiceEnabled
 				);
 
-			int val = (m_PPPPChannel[i].pPPPPChannel->audioEnabled | m_PPPPChannel[i].pPPPPChannel->voiceEnabled << 1) & 0x3;
+			int val = (sessions[i].session->audioEnabled | sessions[i].session->voiceEnabled << 1) & 0x3;
 
 			PUT_LOCK( &PPPPChannelLock );
 		
@@ -282,14 +258,14 @@ int CPPPPChannelManagement::SetAudioStatus(char * szDID,int AudioStatus){
     int i;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0)
         {
-            m_PPPPChannel[i].pPPPPChannel->audioEnabled = (AudioStatus & 0x1);
-			m_PPPPChannel[i].pPPPPChannel->voiceEnabled = (AudioStatus & 0x2) >> 1;
+            sessions[i].session->audioEnabled = (AudioStatus & 0x1);
+			sessions[i].session->voiceEnabled = (AudioStatus & 0x2) >> 1;
 
 			Log3("SET ----> AUDIO PLAY:[%d] AUDIO TALK:[%d].",
-				m_PPPPChannel[i].pPPPPChannel->audioEnabled,
-				m_PPPPChannel[i].pPPPPChannel->voiceEnabled
+				sessions[i].session->audioEnabled,
+				sessions[i].session->voiceEnabled
 				);
 			
 			Log3("SetAudioStatus put channel lock");
@@ -320,11 +296,11 @@ int CPPPPChannelManagement::StartRecorderByDID(char * szDID,char * filepath){
     int i;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0)
         {
-            int ret = m_PPPPChannel[i].pPPPPChannel->StartRecorder(
-				m_PPPPChannel[i].pPPPPChannel->MW,
-				m_PPPPChannel[i].pPPPPChannel->MH,
+            int ret = sessions[i].session->StartRecorder(
+				sessions[i].session->MW,
+				sessions[i].session->MH,
 				25,
 				filepath);
 
@@ -354,9 +330,9 @@ int CPPPPChannelManagement::CloseRecorderByDID(char * szDID)
     int i;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0)
         {
-            m_PPPPChannel[i].pPPPPChannel->CloseRecorder();
+            sessions[i].session->CloseRecorder();
 			
 			Log3("CloseRecorderByDID put channel lock");
 			
@@ -385,14 +361,14 @@ int CPPPPChannelManagement::PPPPSetSystemParams(char * szDID,int type,char * msg
     int i;
 	
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++){
-		if(NULL == m_PPPPChannel[i].pPPPPChannel){
+		if(NULL == sessions[i].session){
 			Log3("Invalid PPPP Channel Object");
 			continue;
 		}
 		
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0){
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0){
 
-			int ret = m_PPPPChannel[i].pPPPPChannel->SetSystemParams(type, msg, len);    	   
+			int ret = sessions[i].session->SetSystemParams(type, msg, len);    	   
 
          	if(1 == ret){
             	r = 1; goto jumpout;
@@ -428,14 +404,14 @@ int CPPPPChannelManagement::CmdExcute(
     int i;
 	int tag=0;
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++){
-		if(NULL == m_PPPPChannel[i].pPPPPChannel){
+		if(NULL == sessions[i].session){
 			Log3("Invalid PPPP Channel Object");
 			continue;
 		}
 		
-        if(m_PPPPChannel[i].bValid == 1 && strcmp(m_PPPPChannel[i].szDID, szDID) == 0){
+        if(sessions[i].bValid == 1 && strcmp(sessions[i].szDID, szDID) == 0){
 
-			int ret = m_PPPPChannel[i].pPPPPChannel->IOCmdSend(gwChannel,cmdType,cmdContent,cmdLen);
+			int ret = sessions[i].session->IOCmdSend(gwChannel,cmdType,cmdContent,cmdLen);
 
          	if(1 == ret){
             	r = 1; goto jumpout;

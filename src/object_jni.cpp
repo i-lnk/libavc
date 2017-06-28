@@ -364,6 +364,7 @@ JNIEXPORT int JNICALL PPPPInitialize(JNIEnv *env ,jobject obj, jstring svr)
 
 JNIEXPORT void JNICALL PPPPManagementInit(JNIEnv *env ,jobject obj)
 { 	
+	Log3("call PPPPChannelMgt initialize");
 	if(g_pPPPPChannelMgt == NULL){
     	g_pPPPPChannelMgt = new CPPPPChannelManagement();
 	}else{

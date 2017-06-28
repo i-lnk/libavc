@@ -57,8 +57,6 @@ extern jmethodID g_CallBack_AlarmNotifyDoorBell;
 extern jmethodID g_CallBack_UILayerNotify;
 extern jmethodID g_CallBack_CmdRecv;
 
-
-
 extern COMMO_LOCK g_CallbackContextLock;
 
 COMMO_LOCK OpenSLLock = PTHREAD_MUTEX_INITIALIZER;
@@ -1524,6 +1522,7 @@ void * MeidaCoreProcess(
 	
 connect:
 	Log3("NOTIFY UI WORK STATUS:[%d][%d]", MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
+	
     hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
     
 	hPC->speakerChannel = -1;
@@ -1787,6 +1786,8 @@ int CPPPPChannel::IOCmdSend(
 	if (nRet<0){
 		return nRet;
 	}
+
+	Log3("IOCMD SEND:[%04X]",cmdType);
 
 	switch(cmdType){
 		case CMD_DATACTRL_PLAYBACK_START:

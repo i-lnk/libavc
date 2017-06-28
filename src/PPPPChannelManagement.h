@@ -9,7 +9,7 @@
 typedef struct _PPPP_CHANNEL
 {
     char szDID[MAX_DID_LENGTH] ;
-    CPPPPChannel *pPPPPChannel;
+    CPPPPChannel * session;
     int bValid;    
 }PPPP_CHANNEL, *PPPPPCHANNEL;
 
@@ -34,17 +34,11 @@ public:
 	
 	int GetAudioStatus(char * szDID);
 	int SetAudioStatus(char * szDID,int AudioStatus);
-
+	
     int PPPPSetSystemParams(char *szDID, int type, char *msg, int len);
 	int CmdExcute(char * szDID,int gwChannel,int cmdType,char * cmdContent,int cmdLen);
 	int StartRecorderByDID(char * szDID,char * filepath);
 	int CloseRecorderByDID(char * szDID);
-
-	//////////尝试还是将音频处理放公共的地方/////////////
-	OPENXL_STREAM * 	hOSL;
-
-private:
-    PPPP_CHANNEL m_PPPPChannel[MAX_PPPP_CHANNEL_NUM];
 };
 
 #endif
