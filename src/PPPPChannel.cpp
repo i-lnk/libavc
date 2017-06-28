@@ -825,6 +825,7 @@ static void * VideoRecvProcess(
 	int firstKeyFrameComming = 0;
 	int	isKeyFrame = 0;
 	int nRet =0;
+	
 #ifdef PLATFORM_ANDROID
 	JNIEnv * hEnv = NULL;
 	bool isAttached = false;
@@ -841,6 +842,7 @@ static void * VideoRecvProcess(
         isAttached = true; 
 	}	
 #endif
+
 	memset(hFrm,0,FrmSize);
 	memset(hYUV,0,hPC->YUVSize);
 	
@@ -976,7 +978,8 @@ static void * AudioRecvProcess(
 	char Codec[4096] = {0};	
 
 	int  CodecLength = 0;
-    int  CodecLengthNeed = 960;
+    int  CodecLengthNeed = 1920;
+	int  Round = 0;
 	
 	AV_HEAD_YUNNI * avhead =(AV_HEAD_YUNNI *)Cache;
 	
@@ -987,11 +990,6 @@ static void * AudioRecvProcess(
 	void * hCodec = NULL;
 
 jump_rst:
-
-	Log3("audio format info:[sr = %d] [ch = %d] [length = %d]",
-		hPC->AudioSampleRate,
-		hPC->AudioChannel,
-		hPC->Audio10msLength);
 	
 	hCodec = audio_dec_init(
 		hPC->AudioRecvFormat,
@@ -1030,6 +1028,8 @@ jump_rst:
 		goto jumperr;
 	}
 #endif
+
+	Round = CodecLengthNeed/hPC->Audio10msLength;
 
 	while(hPC->audioPlaying){
 
@@ -1114,9 +1114,6 @@ jump_rst:
 		if(CodecLength < CodecLengthNeed){
             continue;
         }
-
-		CodecLengthNeed = CodecLength - (CodecLength % hPC->Audio10msLength);
-		int Round = CodecLengthNeed/hPC->Audio10msLength;
         
 		for(int i = 0; i < Round; i++){
 #ifdef ENABLE_NSX_I
@@ -1157,6 +1154,12 @@ static void * AudioSendProcess(
 	void * hCodec = audio_enc_init(hPC->AudioSendFormat,hPC->AudioSampleRate,hPC->AudioChannel);
 	if(hCodec == NULL){
 		Log3("initialize audio encodec handle failed.\n");
+		Log3("audio format info:[sr = %d] [ch = %d] [codec = %02x] [length = %d]",
+		hPC->AudioSampleRate,
+		hPC->AudioChannel,
+		hPC->AudioSendFormat,
+		hPC->Audio10msLength
+		);
 		return NULL;
 	}
 
@@ -1528,8 +1531,7 @@ connect:
 	
 	Log3("[1:%s]=====>start get free session id for client connection.",
          hPC->szDID);
-	//yunni p2p
-	Log3("Connect Begin----------------\n");
+	
 	ret = hPC->Connect(hEnv);
     switch(ret){
 		case 0:
@@ -1683,6 +1685,7 @@ CPPPPChannel::CPPPPChannel(
 
 	AudioSaveLength = 0;
 
+	AudioSendFormat = E_CODEC_AUDIO_G711A;
 	AudioRecvFormat = E_CODEC_AUDIO_G711A; 
 	AudioSampleRate = 8000,
 	AudioChannel = 1;
@@ -1783,6 +1786,24 @@ int CPPPPChannel::IOCmdSend(
 	nRet=ExtCmdHeaderBuild(&extCmdHead,cGwChannel,cmdType,cmdLen);
 	if (nRet<0){
 		return nRet;
+	}
+
+	switch(cmdType){
+		case CMD_DATACTRL_PLAYBACK_START:
+			if(StartMediaStreams(NULL,
+				AudioSampleRate,
+				AudioChannel,
+				AudioRecvFormat,
+				AudioSendFormat,
+				VideoRecvFormat,
+				0,0) != 0
+			){
+				return -1;
+			}
+			break;
+		case CMD_DATACTRL_PLAYBACK_STOP:
+			CloseMediaStreams();
+			break;
 	}
 		
 	memcpy(buf,&extCmdHead,extCmdLen);;

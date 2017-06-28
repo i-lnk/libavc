@@ -27,8 +27,10 @@ CPPPPChannelManagement::CPPPPChannelManagement()
 	Log3("PPPP_GetAPIVersion  [%s] ", szIOVer);
 	
 	Log3("CPPPPChannelManagement ------------------>1");
-    memset(m_PPPPChannel, 0 ,sizeof(PPPP_CHANNEL)*MAX_PPPP_CHANNEL_NUM);
-	//memset(&m_PPPPChannel, 0 ,sizeof(PPPP_CHANNEL));
+	int i = 0;
+	for(i = 0;i < MAX_PPPP_CHANNEL_NUM;i++){
+		memset(&m_PPPPChannel[i], 0 ,sizeof(PPPP_CHANNEL));
+	}
 	Log3("CPPPPChannelManagement ------------------>2");
 
 	int err = 0;
@@ -64,16 +66,19 @@ CPPPPChannelManagement::~CPPPPChannelManagement()
 int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *server)
 {
 	if(szDID == NULL) return 0;
+
+	Log3("GET CHANNEL LOCK");
 	
 	GET_LOCK( &PPPPChannelLock );
 
 	int r = 1;
     int i = 0;
 
+	Log3("channel management start device id:[%s]",szDID);
+
     for(i = 0; i < MAX_PPPP_CHANNEL_NUM; i++)
     {
-        if(strcmp(m_PPPPChannel[i].szDID, szDID) == 0)
-        {
+        if(strcmp(m_PPPPChannel[i].szDID, szDID) == 0){
            	r = m_PPPPChannel[i].pPPPPChannel->Start(user, pwd, server);
             goto jumpout;
         }
@@ -85,9 +90,11 @@ int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *serv
         {
             m_PPPPChannel[i].bValid = 1;
 
-            strcpy(m_PPPPChannel[i].szDID, szDID);      
+            strcpy(m_PPPPChannel[i].szDID, szDID); 
+			
             m_PPPPChannel[i].pPPPPChannel = new CPPPPChannel(szDID, user, pwd, server);
             m_PPPPChannel[i].pPPPPChannel->Start(user, pwd, server);
+			
 			goto jumpout;
         }
     }
@@ -95,6 +102,8 @@ int CPPPPChannelManagement::Start(char * szDID, char *user, char *pwd,char *serv
 	r = 0;
 
 jumpout:
+
+	Log3("PUT CHANNEL LOCK");
 
 	PUT_LOCK( &PPPPChannelLock );
     
