@@ -1999,6 +1999,8 @@ void CPPPPChannel::Close()
 {
 	mediaLinking = 0;
 
+	PPPPClose();
+
 	while(1){
 		if(TRY_LOCK(&SessionLock) == 0){
 			break;
