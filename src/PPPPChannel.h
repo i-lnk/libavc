@@ -51,29 +51,14 @@
 #define MAX_PATHNAME_LEN 	256
 
 //msgtype
-#define MSG_NOTIFY_TYPE_PPPP_STATUS 0   	/* ¡¨Ω”◊¥Ã¨ */
-#define MSG_NOTIFY_TYPE_PPPP_MODE 1   		/* ¡¨Ω”ƒ£ Ω */
+#define MSG_NOTIFY_TYPE_PPPP_STATUS 0   	
+#define MSG_NOTIFY_TYPE_PPPP_MODE 1   	
 #define MSG_NOTIFY_TYPE_STREAM_TYPE 2
 
-#define P2P_CHANNEL_CMMND   0
+#define P2P_CHANNEL_CMMND    0
 #define P2P_CHANNEL_VIDEO    1
 #define P2P_CHANNEL_AUDIO    2
 #define P2P_CHANNEL_FILE     3
-
-//pppp status
-#define PPPP_STATUS_CONNECTING 0 			/* ’˝‘⁄¡¨Ω” */
-#define PPPP_STATUS_INITIALING 1 			/* ’˝‘⁄≥ı ºªØ */
-#define PPPP_STATUS_ON_LINE 2 				/* …Ë±∏‘⁄œﬂ */
-#define PPPP_STATUS_CONNECT_FAILED 3		/* ¡¨Ω” ß∞‹ */
-#define PPPP_STATUS_DISCONNECT 4 			/* ¡¨Ω”∂œø™ */
-#define PPPP_STATUS_INVALID_ID 5 			/* Œﬁ–ß…Ë±∏ */
-#define PPPP_STATUS_DEVICE_NOT_ON_LINE 6	/* …Ë±∏¿Îœﬂ */
-#define PPPP_STATUS_CONNECT_TIMEOUT 7 		/* ¡¨Ω”≥¨ ± */
-#define PPPP_STATUS_INVALID_USER_PWD 8 		/* Œﬁ–ß’Àªß√‹¬Î */
-#define PPPP_STATUS_DEVICE_SLEEP 9
-
-#define PPPP_STATUS_NOT_LOGIN 11			/* Œ¥µ«¬º */
-#define PPPP_STATUS_EXCEED_SESSION 13		/* √ª”–ø…”√µƒª·ª∞ */
 
 #define COMMAND_BUFFER_SIZE 32*1024
 
