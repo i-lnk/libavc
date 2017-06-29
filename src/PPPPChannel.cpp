@@ -1200,7 +1200,7 @@ static void * AudioSendProcess(
 	
 	if(!hOSL){
 		Log3("opensl init failed.");
-		hPC->audioPlaying = 0;
+		hPC->audioSending = 0;
 	}
 
 	char hFrame[4*960] = {0};
