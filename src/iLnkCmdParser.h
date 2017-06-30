@@ -29,7 +29,7 @@ extern int parseWifiSetting(JNIEnv *env,jobject cmdParam,wifiParam_t *wifiParams
 extern int parsePushParam(JNIEnv *env,jobject cmdParam,pushParam_t *pushParameter);
 extern int parseRecNow(JNIEnv *env,jobject cmdParam,recNow_t *recNow);
 extern int parsePicCap(JNIEnv *env,jobject cmdParam,picCap_t *picCap);
-extern int parseStoragePolicy(JNIEnv *env,jobject cmdParam,mRfsStoragePolicy_t *storagePolicy);
+extern int parseStoragePolicy(JNIEnv *env,jobject cmdParam,mStoragePolicy_t *storagePolicy);
 extern int parseSdRecSchSet(JNIEnv *env,jobject cmdParam,sdRecSchSet_t *sdRecSchSet);
 extern int parseSearchRecordFile(JNIEnv *env,jobject cmdParam,sdRecSearchCondition_t *searchRecFile);
 extern int parsePassThroghString(JNIEnv *env,jobject cmdParam,passThroghString_t *passThroghString);

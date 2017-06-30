@@ -564,7 +564,7 @@ typedef struct
     unsigned int      rcAudioSamplerate;
     unsigned int      rcAudioBitWidth;    // 8/16
     unsigned int      rcAudioMaxBitrate;
-    unsigned char      rcAudioTrack;       // 1-单声道, 2-立体声
+    unsigned int      rcAudioTrack;       // 1-单声道, 2-立体声
 } mRfsRecConfig_t;
 // 存储策略
 typedef struct
@@ -580,6 +580,36 @@ typedef struct{
 	mRfsRecConfig_t	recConf; 
 	mRfsStoragePolicy_t	storagePolicy;
 }AVRecPolicy_t;
+
+// 录像配置
+typedef struct 
+{
+    unsigned int      rcVideoWidth;
+    unsigned int      rcVideoHeight;
+    unsigned int      rcVideoRate;        // 帧率(25)
+    unsigned int      rcVideoMaxBitrate;
+
+    unsigned int      rcAudioSamplerate;
+    unsigned int      rcAudioBitWidth;    // 8/16
+    unsigned int      rcAudioMaxBitrate;
+    unsigned int     rcAudioTrack;       // 1-单声道, 2-立体声
+} mRecConfig_t;
+
+// 存储策略
+typedef struct
+{
+    unsigned int      spMaxHour;          // 保持多少个小时内的录像(0-不限制, 其他值-小时数)
+    unsigned int      spFullThreshold;    // 临界值(剩余空间不足多少MB时认为满)
+    unsigned int      spRecycle;          // 盘满后是否循环覆盖(0-不覆盖, 1-覆盖)
+    unsigned int      spCleanData;        // 回收时是否清除数据(0-不清, 1-清除)
+} mStoragePolicy_t;
+
+//录像策略
+typedef struct{
+	mRecConfig_t	recConf; 
+	mStoragePolicy_t	storagePolicy;
+	}mAVRecPolicy_t;
+
 
 
 //文件传输参数,也用作录像文件、录音文件回放

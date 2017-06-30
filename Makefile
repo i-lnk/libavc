@@ -61,6 +61,7 @@ ANDROID_LIBS = -L$(SYSROOT)\usr\lib -L$(LIBPATH) \
 
 OBJECT_FILE = src/circlebuffer.o \
 src/muxing.o \
+src/utility.o \
 src/H264Decoder.o \
 src/iLnkCmdParser.o \
 src/PPPPChannel.o \

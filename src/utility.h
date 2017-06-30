@@ -94,4 +94,9 @@ typedef	pthread_t		PROCESS_HANDLE;
 }
 #endif
 
+#include "iLnkDefine.h"
+void Utils_Cmd_SysOprPolicy_Print(sysOprPolicy_t_EX sysOprCfg);
+void Utils_Cmd_SdAVRecPolicy_Print(mAVRecPolicy_t AVRecPolicy);
+
+
 #endif /* UTILITY_H_ */

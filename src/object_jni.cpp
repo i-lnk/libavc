@@ -871,6 +871,7 @@ JNIEXPORT int JNICALL SendCtrlCommand_EX(
 					memset(&oprPolicy,0x00,len);
 					nRet=parseOprPolicy(env,cmdParam,&oprPolicy);
 					if (nRet<0)goto toRet;
+					Utils_Cmd_SysOprPolicy_Print(oprPolicy);
 					param=(char *)&oprPolicy;
 				#else
 					param=(char *)cmdParam;
@@ -1072,14 +1073,18 @@ JNIEXPORT int JNICALL SendCtrlCommand_EX(
 				break;
 			case CMD_SD_RECPOLICY_SET:
 				{
-				len=sizeof(mRfsStoragePolicy_t);
+				len=sizeof(mAVRecPolicy_t);
 				#ifdef PLATFORM_ANDROID
-					mRfsStoragePolicy_t storagePolicy;
+					mStoragePolicy_t storagePolicy;
 					memset(&storagePolicy,0x00,len);
 					nRet=parseStoragePolicy(env,cmdParam,&storagePolicy);
 					if (nRet<0)goto toRet;
-					//paramToPrint(CMD_SD_RECPOLICY_SET,(void *)&storagePolicy);
-					param=(char *)&storagePolicy;
+
+					mAVRecPolicy_t avRecPolicy;
+					avRecPolicy.storagePolicy=storagePolicy;
+
+					Utils_Cmd_SdAVRecPolicy_Print(avRecPolicy);
+					param=(char *)&avRecPolicy;
 				#else
 					param=(char *)cmdParam;
 				#endif

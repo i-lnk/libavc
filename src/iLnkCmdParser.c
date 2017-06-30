@@ -782,7 +782,7 @@ int parsePicCap(JNIEnv *env,jobject cmdParam,picCap_t *picCap){
 	return nRet;	
 	}
 
-int parseStoragePolicy(JNIEnv *env,jobject cmdParam,mRfsStoragePolicy_t *storagePolicy){
+int parseStoragePolicy(JNIEnv *env,jobject cmdParam,mStoragePolicy_t *storagePolicy){
 	int nRet=0;
 	jclass cmdParamClass;
 	
@@ -803,8 +803,8 @@ int parseStoragePolicy(JNIEnv *env,jobject cmdParam,mRfsStoragePolicy_t *storage
 
 	storagePolicy->spCleanData=(int)jspCleanData;
 	storagePolicy->spFullThreshold=(int)jspFullThreshold;
-	storagePolicy->spMaxHour=(unsigned char)((int)jspMaxHour);
-	storagePolicy->spRecycle=(unsigned char)((int)jspRecycle);
+	storagePolicy->spMaxHour=(int)jspMaxHour;
+	storagePolicy->spRecycle=(int)jspRecycle;
 
 	return nRet;	
 	}
