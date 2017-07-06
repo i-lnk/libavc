@@ -1,4 +1,7 @@
 /**/
+
+#ifdef PLATFORM_ANDROID
+
 #include <jni.h>
 #include <string.h>
 #include "stdio.h"
@@ -1066,4 +1069,4 @@ int parseFileInfo(JNIEnv *env,jobject cmdParam,fileTransParam_t *fileTransParam)
 	}
 #endif
 
-
+#endif
