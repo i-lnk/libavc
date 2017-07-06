@@ -129,7 +129,6 @@ JNIEnv iOSEnv;
 #endif
 
 COMMO_LOCK g_CallbackContextLock = PTHREAD_MUTEX_INITIALIZER;
-
 COMMO_LOCK g_FindDevsProcessLock = PTHREAD_MUTEX_INITIALIZER;
 
 static CSearchDVS * g_PSearchDVS = NULL;
