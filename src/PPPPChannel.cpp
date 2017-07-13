@@ -1515,7 +1515,7 @@ void * MeidaCoreProcess(
 
 	int resend = 0;
 	int wakeup_times = 20;
-	int retry = 5;
+	int retry = 3;
 
 	int ret = 0;
 	int connection_status = PPPP_STATUS_DISCONNECTED;
@@ -1523,8 +1523,13 @@ void * MeidaCoreProcess(
 	hPC->startSession = 0;
 	
 connect:
-	Log3("NOTIFY UI WORK STATUS:[%d][%d]", MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
+	Log3("RETRY TIME:[%d]",retry);
 	
+	if(!retry--){
+		goto jumperr;
+	}
+
+	Log3("NOTIFY UI WORK STATUS:[%d][%d]", MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
     hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_CONNECTING);
     
 	hPC->speakerChannel = -1;
@@ -1537,14 +1542,15 @@ connect:
     switch(ret){
 		case 0:
 			break;
-		case -1:
+		case ERROR_PPPP_DEVICE_NOT_ONLINE:
 			connection_status = PPPP_STATUS_DISCONNECTED;
 			goto jumperr;
-		case -2:
+		case ERROR_PPPP_NOT_LOGIN:
 			connection_status = PPPP_STATUS_USER_NOT_LOGIN;
 			goto jumperr;
 		default:
-			goto jumperr;
+			connection_status = PPPP_STATUS_SESSIONSETUP_TIMEOUT;
+			goto connect;
 	}
 	
 	hPC->videoPlaying = 1;
@@ -1598,11 +1604,22 @@ connect:
 		st_PPPP_Session1 SInfo;
 		memset(&SInfo,0x00,sizeof(st_PPPP_Session1));
 		ret = PPPP_Check(hPC->sessionID,&SInfo);
-		
-		if(ret < 0){
-			Log3("NOTIFY UI WORK STATUS:[%d][%d]", MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_DEVICE_OFFLINE);
-			hPC->MsgNotify(hEnv,MSG_NOTIFY_TYPE_PPPP_STATUS, PPPP_STATUS_DEVICE_OFFLINE);
-			break;
+
+		switch(ret){
+			case ERROR_PPPP_SUCCESSFUL:
+				continue;
+			case ERROR_PPPP_DEVICE_NOT_ONLINE:
+				connection_status = PPPP_STATUS_DEVICE_OFFLINE;
+				break;
+			case ERROR_PPPP_MAX_SESSION:
+				connection_status = PPPP_STATUS_REMOTE_SESSION_OVERLIMIT;
+				break;
+			case ERROR_PPPP_NOT_LOGIN:
+				connection_status = PPPP_STATUS_USER_NOT_LOGIN;
+				break;
+			default:
+				connection_status = PPPP_STATUS_SESSIONSETUP_TIMEOUT;
+				goto connect;
 		}
 
 		if(hPC->startSession){	// for reconnect, we just refresh status for ui layer
@@ -1825,71 +1842,24 @@ int CPPPPChannel::IOCmdSend(
 int  CPPPPChannel::Connect(JNIEnv *env)
 {
    // F_LOG;
-	int msgType=MSG_NOTIFY_TYPE_CONNECT_PPPP_STATUS;
-	int msgLen=4;
-	int iMsgContent;
-	char *svrStr=NULL;
+	int    msgLen = 4;
+	char * svrStr = NULL;
 	sessionID = PPPP_Connect(szDID,1,0,&svrStr);
 
 	if(sessionID < 0){
 		Log3("PPPP_Connect failed.. %s return: %d", szDID, sessionID);  
-		if (sessionID==ERROR_PPPP_SERVER_CHANGED){
+		if (sessionID == ERROR_PPPP_SERVER_CHANGED){
 			Log3("server changed, svr:%s\n",(svrStr==NULL)?"null":svrStr);
-			if (svrStr!=NULL)free(svrStr);
+			if (svrStr!=NULL) free(svrStr);
 			return -1;
 		}
-		
-		switch(sessionID)
-		{
-			case ERROR_PPPP_TIME_OUT:
-				iMsgContent=PPPP_STATUS_SESSIONSETUP_TIMEOUT;
-				break;
-			case ERROR_PPPP_INVALID_ID:
-			case ERROR_PPPP_INVALID_PREFIX:
-				iMsgContent=PPPP_STATUS_ID_INVALID;
-				break;
-			case ERROR_PPPP_ID_OUT_OF_DATE:
-				iMsgContent=PPPP_STATUS_ID_OUTOFDATE;
-				break;
-			case ERROR_PPPP_DEVICE_MAX_SESSION:
-				iMsgContent=PPPP_STATUS_LOCAL_SESSION_OVERLIMIT;
-				break;
-			case ERROR_PPPP_DEVICE_NOT_ONLINE:
-				iMsgContent=PPPP_STATUS_DEVICE_OFFLINE;
-				break;
-			case ERROR_PPPP_NOT_INITIALIZED:
-				iMsgContent=PPPP_STATUS_NOT_INITIALIZED;
-				break;
-			case ERROR_PPPP_NO_RELAY_SERVER_AVAILABLE:
-				iMsgContent=PPPP_STATUS_UNKNOWN_ERROR;
-				break;
-			case ERROR_PPPP_MAX_SESSION:
-				iMsgContent=PPPP_STATUS_REMOTE_SESSION_OVERLIMIT;
-				break;
-			case ERROR_PPPP_UDP_PORT_BIND_FAILED:
-			case ERROR_PPPP_NO_NETCARD:
-				iMsgContent=PPPP_STATUS_DEVICE_OFFLINE;
-				break;
-			case ERROR_PPPP_USER_CONNECT_BREAK: 
-				iMsgContent=PPPP_STATUS_DEVICE_OFFLINE;
-				break;
-			default:
-				iMsgContent=PPPP_STATUS_UNKNOWN_ERROR;
-				break;
-		}
 
-		Log3("NOTIFY UI WORK STATUS:[%d][%d]",msgType,iMsgContent);
-		MsgNotify(env,msgType,iMsgContent);
-		return -1;
+		return sessionID;
 	}
-
 	
 	if(strcmp(szUsr,"") == 0){
 		//Ê×´ÎÌí¼ÓÄ¬ÈÏÎ´µÇÂ½×´Ì¬
-		iMsgContent=PPPP_STATUS_USER_NOT_LOGIN;
-		Log3("NOTIFY UI WORK STATUS:[%d][%d]",msgType,iMsgContent);
-		MsgNotify(env,msgType,iMsgContent);
-		return -2;
+		return ERROR_PPPP_NOT_LOGIN;
 	}
 	
 	user_t userParam;
