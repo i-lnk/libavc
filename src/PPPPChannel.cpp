@@ -688,7 +688,7 @@ void * IOCmdRecvProcess(
 	    if(g_CallBack_Handle != NULL){     
 			jbyteArray jbyteArray_cmd = hEnv->NewByteArray(hCCH->len);
 	
-			hEnv->SetByteArrayRegion(jbyteArray_cmd,0,hCCH->len,(jbyte*)hCCH->d);
+			hEnv->SetByteArrayRegion(jbyteArray_cmd,0,hCCH->len,(const jbyte*)hCCH->d);
 			
 			hEnv->CallVoidMethod(
 				g_CallBack_Handle, 

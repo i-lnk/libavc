@@ -836,7 +836,7 @@ JNIEXPORT int JNICALL SendCtrlCommand_EX(
 					if (nRet<0)goto toRet;
 				#else
 					serialData_t * cmdData = (serialData_t *)cmdParam;
-					serialData serialData;
+					serialData_t serialData;
 					memset(&serialData,0,sizeof(serialData));
 					serialData.len = cmdData->len;
 					memcpy(serialData.data,cmdData->data,sizeof(serialData.data));
