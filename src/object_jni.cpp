@@ -31,7 +31,7 @@ jmethodID g_CallBack_CmdRecv =	NULL;
 JavaVM * g_JavaVM = NULL;
 static const char * classPathName = ANDROID_CLASS_PATH;
 #else
-void   JNIEnv::SetByteArrayRegion(char * a, int b, int c, char * d){
+void   JNIEnv::SetByteArrayRegion(char * a, int b, int c,const jbyte * d){
 	memcpy(a,&d[b],c);
 }
 
