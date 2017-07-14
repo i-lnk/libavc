@@ -1525,7 +1525,7 @@ void * MeidaCoreProcess(
 connect:
 	Log3("RETRY TIME:[%d]",retry);
 	
-	if(!retry--){
+	if(!retry-- || hPC->mediaLinking != 1){
 		goto jumperr;
 	}
 
@@ -1544,12 +1544,31 @@ connect:
 			break;
 		case ERROR_PPPP_DEVICE_NOT_ONLINE:
 			connection_status = PPPP_STATUS_DISCONNECTED;
+			Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
+			hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+			retry = 3; sleep(5);
+			goto connect;
+		case ERROR_PPPP_MAX_SESSION:
+			connection_status = PPPP_STATUS_REMOTE_SESSION_OVERLIMIT;
 			goto jumperr;
 		case ERROR_PPPP_NOT_LOGIN:
 			connection_status = PPPP_STATUS_USER_NOT_LOGIN;
 			goto jumperr;
+		case ERROR_PPPP_ID_OUT_OF_DATE:
+			connection_status = PPPP_STATUS_ID_OUTOFDATE;
+			goto connect;
+		case ERROR_PPPP_INVALID_ID:
+		case ERROR_PPPP_INVALID_PREFIX:
+			connection_status = PPPP_STATUS_ID_INVALID;
+			Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
+			hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+			goto connect;
+		case ERROR_PPPP_UNAUTHORIZ:
+			connection_status = PPPP_STATUS_USER_INAUTHENTICATED;
+			goto jumperr;
 		default:
 			connection_status = PPPP_STATUS_SESSIONSETUP_TIMEOUT;
+			retry = 3; sleep(5);
 			goto connect;
 	}
 	
@@ -1606,19 +1625,37 @@ connect:
 		ret = PPPP_Check(hPC->sessionID,&SInfo);
 
 		switch(ret){
-			case ERROR_PPPP_SUCCESSFUL:
-				continue;
-			case ERROR_PPPP_DEVICE_NOT_ONLINE:
-				connection_status = PPPP_STATUS_DEVICE_OFFLINE;
+			case 0:
 				break;
+			case ERROR_PPPP_DEVICE_NOT_ONLINE:
+				connection_status = PPPP_STATUS_DISCONNECTED;
+				Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
+				hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+				retry = 3; sleep(5);
+				goto connect;
 			case ERROR_PPPP_MAX_SESSION:
 				connection_status = PPPP_STATUS_REMOTE_SESSION_OVERLIMIT;
-				break;
+				goto jumperr;
 			case ERROR_PPPP_NOT_LOGIN:
 				connection_status = PPPP_STATUS_USER_NOT_LOGIN;
-				break;
+				goto jumperr;
+			case ERROR_PPPP_ID_OUT_OF_DATE:
+				connection_status = PPPP_STATUS_ID_OUTOFDATE;
+				Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
+				hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+				goto connect;
+			case ERROR_PPPP_INVALID_ID:
+			case ERROR_PPPP_INVALID_PREFIX:
+				connection_status = PPPP_STATUS_ID_INVALID;
+				Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
+				hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+				goto connect;
+			case ERROR_PPPP_UNAUTHORIZ:
+				connection_status = PPPP_STATUS_USER_INAUTHENTICATED;
+				goto jumperr;
 			default:
 				connection_status = PPPP_STATUS_SESSIONSETUP_TIMEOUT;
+				retry = 3; sleep(5);
 				goto connect;
 		}
 
@@ -1880,40 +1917,22 @@ void CPPPPChannel::ConnectUserCheckAcK(
 	unsigned short len
 	){
 	int ret=0;
-	int iMsgContent=0;
 	int iMsgLen=4;
 	int iMsgType=MSG_NOTIFY_TYPE_PPPP_STATUS;
 
 	if (pbuf == NULL||len<4){
-		iMsgContent=PPPP_STATUS_USER_INVALID;
-		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
-		MsgNotify(env,iMsgType,iMsgContent);
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,PPPP_STATUS_USER_INVALID);
+		MsgNotify(env,iMsgType,PPPP_STATUS_USER_INVALID);
 		return;
 	}
 	
 	//处理回应
 	if (len < 4 + sizeof(st_usrChkRet)){
 		memcpy(&ret,pbuf,4);
-		
-		switch(ret){
-			case APP_ERR_OK:
-				iMsgContent = PPPP_STATUS_USER_INVALID;
-				break;
-			case APP_ERR_UNAUTH:
-			case APP_ERR_INVALID_PARAM:
-			case APP_ERR_CMDEXCUTE_FAILED:
-			case APP_ERR_NONE_RESULT:
-			case APP_ERR_UNKNOWN:
-			case APP_ERR_NO_PRIVILEGE:
-				iMsgContent = PPPP_STATUS_USER_INVALID;
-			default:
-				Log3("get unknow err code:[%d].",ret);
-				iMsgContent = PPPP_STATUS_USER_NOT_LOGIN;
-				break;
-		}
-		
-		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
-		MsgNotify(env,iMsgType,iMsgContent);
+
+		Log3("authroize unknow err code:[%d].",ret);
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,PPPP_STATUS_USER_INVALID);
+		MsgNotify(env,MSG_NOTIFY_TYPE_PPPP_STATUS,PPPP_STATUS_USER_INVALID);
 		
 		return;
 	}
@@ -1921,17 +1940,14 @@ void CPPPPChannel::ConnectUserCheckAcK(
     st_usrChkRet *p = (st_usrChkRet *)(pbuf+4);
 
 	if (p->privilege > 0){
-		 strncpy(szTicket,p->ticket,4);
-		 iMsgContent=PPPP_STATUS_CONNECTED ;
-		 Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
-		 MsgNotify(env,iMsgType,iMsgContent);
-		 Log3("Connect success--------%s\n",szDID);
-		 return;
-	}
-	else{
-		iMsgContent=PPPP_STATUS_USER_INVALID;
-		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,iMsgContent);
-		MsgNotify(env,iMsgType,iMsgContent);
+		strncpy(szTicket,p->ticket,4);
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,PPPP_STATUS_CONNECTED);
+		MsgNotify(env,iMsgType,PPPP_STATUS_CONNECTED);
+		Log3("Connect success--------%s\n",szDID);
+		return;
+	}else{
+		Log3("NOTIFY UI WORK STATUS:[%d][%d]",iMsgType,PPPP_STATUS_USER_INVALID);
+		MsgNotify(env,iMsgType,PPPP_STATUS_USER_INVALID);
 		return;
 	}
 }

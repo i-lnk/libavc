@@ -132,124 +132,7 @@ COMMO_LOCK g_CallbackContextLock = PTHREAD_MUTEX_INITIALIZER;
 COMMO_LOCK g_FindDevsProcessLock = PTHREAD_MUTEX_INITIALIZER;
 
 static CSearchDVS * g_PSearchDVS = NULL;
-static CPPPPChannelManagement * g_pPPPPChannelMgt = NULL;
-
-//	Kepp Server Always On Current Signed
-/** 
- * 执行命令 
- */  
-void ExecuteCommandWithPopen(char* command, char* out_result,  
-        int resultBufferSize) {  
-    FILE * fp;  
-    out_result[resultBufferSize - 1] = '\0';  
-    fp = popen(command, "r");  
-    if (fp) {  
-        fgets(out_result, resultBufferSize - 1, fp);  
-        out_result[resultBufferSize - 1] = '\0';  
-        pclose(fp);  
-    } else {  
-        exit(0);  
-    }  
-}  
-
-  
-/** 
- * 检测服务，如果不存在服务则启动. 
- * 通过am命令启动一个laucher服务,由laucher服务负责进行主服务的检测,laucher服务在检测后自动退出 
- */  
-void check_and_restart_service(char* service) {  
-    char cmdline[200];  
-    sprintf(cmdline, "am startservice --user 0 -n %s", service);  
-	Log3("cmdline -------------------------->%s",cmdline);
-    char tmp[200];  
-    sprintf(tmp, "cmd=%s", cmdline);  
-    ExecuteCommandWithPopen(cmdline, tmp, 200);  
-	
-}       
-
-void * Check_and_Restart_Thread(void * args) {  
-	char * srvname = (char *)args;
-    while(1){  
-        check_and_restart_service(srvname);  
-        sleep(4);  
-    }  
-} 
-
-int  KeepOnServer(int argc, char* srvname, char* sd) {  
-    pthread_t id;  
-    int ret;  
-    struct rlimit r;  
-	int pid = fork();  
-    Log3("fork pid: %d", pid);  
-    if (pid < 0) {  
-        Log3("first fork() error pid %d,so exit", pid);  
-        exit(0);  
-    } else if (pid != 0) {  
-        Log3("first fork(): I'am father pid=%d", getpid());  
-        //exit(0);  
-    } else { //  第一个子进程  
-	
-        Log3("first fork(): I'am child pid=%d", getpid());  
-        setsid();  
-        Log3("first fork(): setsid=%d", setsid());  
-        umask(0); //为文件赋予更多的权限，因为继承来的文件可能某些权限被屏蔽  
-  
-        int pid = fork();  
-        if (pid == 0) { // 第二个子进程  
-            FILE  *fp;  
-            sprintf(sd,"%s/pid.txt",sd);  
-            if((fp=fopen(sd,"a"))==NULL) {//打开文件 没有就创建  
-                Log3("%s文件还未创建!",sd);  
-                ftruncate(fileno(fp), 0);  
-                lseek(fileno(fp), 0, SEEK_SET);  
-            }  
-            fclose(fp);  
-            fp=fopen(sd,"rw");  
-            if(fp>0){  
-                char buff1[6];  
-                int p = 0;  
-                memset(buff1,0,sizeof(buff1));  
-                fseek(fp,0,SEEK_SET);  
-                fgets(buff1,6,fp);  //读取一行（pid）  
-                if(strlen(buff1)>1){ // 有值  
-                    kill(atoi(buff1), SIGTERM); // 把上一次的进程干掉，防止重复执行  
-                }  
-            }  
-            fclose(fp);  
-            fp=fopen(sd,"w");  
-            char buff[100];  
-            int k = 3;  
-            if(fp>0){  
-                sprintf(buff,"%lu",getpid());  
-                fprintf(fp,"%s\n",buff); // 把进程号写入文件  
-            }  
-            fclose(fp);  
-            fflush(fp);  
-            chdir("/"); //修改进程工作目录为根目录 
-            //关闭不需要的从父进程继承过来的文件描述符。  
-            if (r.rlim_max == RLIM_INFINITY) {  
-                r.rlim_max = 1024;  
-            }  
-            int i;  
-            for (i = 0; i < r.rlim_max; i++) {  
-                close(i);  
-            }  
-  
-            umask(0);  
-            ret = pthread_create(&id, NULL,Check_and_Restart_Thread,(void *)srvname); // 开启线程，轮询去监听启动服务  
-            if (ret != 0) {  
-                Log3("Create pthread error!\n");  
-                exit(1);  
-            }  
-            int stdfd = open ("/dev/null", O_RDWR);  
-            dup2(stdfd, STDOUT_FILENO);  
-            dup2(stdfd, STDERR_FILENO);  
-        	} else {  
-            	exit(0);  
-        	}  
-        }
-    	return 0;  
-}  
+static CPPPPChannelManagement * g_pPPPPChannelMgt = NULL;  
 
 static void YUV4202RGB565_CALL(int width, int height, const unsigned char *src, unsigned short *dst)  
 {  
@@ -322,15 +205,6 @@ JNIEXPORT int JNICALL YUV4202RGB565(JNIEnv *env, jobject obj, jbyteArray yuv, jb
 
     return 1;
 }
-
-
-JNIEXPORT void JNICALL AlwaysRunServer(JNIEnv *env ,jobject obj, jstring rptr_ProcessName, jstring sdpath)
-{  
-	
-    char * rtn =  (char*)env->GetStringUTFChars(rptr_ProcessName,0); // 得到进程名称  
-    char * sd =  (char*)env->GetStringUTFChars(sdpath,0);  
-  	KeepOnServer(1, rtn, sd);  
-}  
 
 JNIEXPORT int JNICALL PPPPInitialize(JNIEnv *env ,jobject obj, jstring svr)
 {
