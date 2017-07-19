@@ -1158,7 +1158,6 @@ JNIEXPORT int JNICALL CloseRecorder(
 
 static JNINativeMethod Calls[] = {
 	{"YUV4202RGB565", "([B[BII)I", (void*)YUV4202RGB565},
-	{"AlwaysRunServer","(Ljava/lang/String;Ljava/lang/String;)V", (void*)AlwaysRunServer},
 	{"PPPPInitialize", "(Ljava/lang/String;)I", (void*)PPPPInitialize},
 	{"StartSearch", "(Ljava/lang/String;Ljava/lang/String;)V", (void*)StartSearch},
 	{"CloseSearch", "()V", (void*)CloseSearch},

@@ -64,8 +64,6 @@ JNIEXPORT int  JNICALL YUV4202RGB565(JNIEnv *, jobject, jbyteArray, jbyteArray, 
 
 JNIEXPORT int  JNICALL PPPPSetCallbackContext(JNIEnv *, jobject, jobject);
 
-JNIEXPORT void JNICALL AlwaysRunServer(JNIEnv*, jobject, jstring, jstring);
-
 JNIEXPORT int JNICALL PPPPInitialize(JNIEnv *, jobject, jstring);
 
 JNIEXPORT void JNICALL StartSearch(JNIEnv *, jobject, jstring, jstring);
