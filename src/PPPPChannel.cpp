@@ -1631,6 +1631,8 @@ connect:
 				connection_status = PPPP_STATUS_DISCONNECTED;
 				Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
 				hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+				hPC->PPPPClose();
+				hPC->CloseWholeThreads();
 				retry = 3; sleep(5);
 				goto connect;
 			case ERROR_PPPP_MAX_SESSION:
@@ -1643,18 +1645,24 @@ connect:
 				connection_status = PPPP_STATUS_ID_OUTOFDATE;
 				Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
 				hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+				hPC->PPPPClose();
+				hPC->CloseWholeThreads();
 				goto connect;
 			case ERROR_PPPP_INVALID_ID:
 			case ERROR_PPPP_INVALID_PREFIX:
 				connection_status = PPPP_STATUS_ID_INVALID;
 				Log3("NOTIFY UI WORK STATUS:[%d][%d]",MSG_NOTIFY_TYPE_PPPP_STATUS,connection_status);
 				hPC->MsgNotify(hEnv, MSG_NOTIFY_TYPE_PPPP_STATUS, connection_status);
+				hPC->PPPPClose();
+				hPC->CloseWholeThreads();
 				goto connect;
 			case ERROR_PPPP_UNAUTHORIZ:
 				connection_status = PPPP_STATUS_USER_INAUTHENTICATED;
 				goto jumperr;
 			default:
 				connection_status = PPPP_STATUS_SESSIONSETUP_TIMEOUT;
+				hPC->PPPPClose();
+				hPC->CloseWholeThreads();
 				retry = 3; sleep(5);
 				goto connect;
 		}
@@ -2134,6 +2142,8 @@ int CPPPPChannel::StartMediaStreams(
 
 	if(TRY_LOCK(&DestoryLock) != 0){
 		Log3("media stream will be destory.");
+		PUT_LOCK(&PlayingLock);
+		return -1;
 	}
 
 	Log3("media stream start here.");
